@@ -23,7 +23,8 @@ class MultiDiseaseInference:
         self.models = {
             'diabetes': {},
             'anemia': {},
-            'ckd': {}
+            'ckd': {},
+            'parathyroid': {}
         }
         self._models_loaded = False
     
@@ -33,7 +34,8 @@ class MultiDiseaseInference:
         self.models = {
             'diabetes': {},
             'anemia': {},
-            'ckd': {}
+            'ckd': {},
+            'parathyroid': {}
         }
         self.load_models()
     
@@ -50,6 +52,10 @@ class MultiDiseaseInference:
             
             # Load CKD Models
             self._load_ckd_models()
+
+            # Parathyroid currently uses rule-based inference until
+            # dedicated trained models are added to the repository.
+            self._load_parathyroid_models()
             
             self._models_loaded = True
             print("✅ All models loaded successfully!")
@@ -220,6 +226,78 @@ class MultiDiseaseInference:
                     'max_length': 25  # From ckd_progression_lstm.py
                 }
             print("  ✅ CKD progression config loaded")
+
+    def _load_parathyroid_models(self):
+        """Load parathyroid ML models, with rule-based fallback."""
+        print("\n🧠 Loading Parathyroid support...")
+
+        # Defaults
+        self.models['parathyroid']['diagnosis'] = "rule_based"
+        self.models['parathyroid']['progression'] = "rule_based"
+
+        # Diagnosis model
+        diagnosis_path = self.models_dir / "parathyroid_diagnosis_xgb_model.pkl"
+        diagnosis_encoder_path = self.models_dir / "parathyroid_diagnosis_label_encoder.pkl"
+        diagnosis_features_path = self.models_dir / "parathyroid_diagnosis_features.json"
+        if diagnosis_path.exists() and diagnosis_encoder_path.exists():
+            self.models['parathyroid']['diagnosis'] = joblib.load(diagnosis_path)
+            self.models['parathyroid']['diagnosis_encoder'] = joblib.load(diagnosis_encoder_path)
+            print("  ✅ Parathyroid diagnosis model loaded")
+
+            if diagnosis_features_path.exists():
+                with open(diagnosis_features_path, 'r') as f:
+                    self.models['parathyroid']['diagnosis_features'] = json.load(f)
+                print("  ✅ Parathyroid diagnosis features loaded")
+
+        # Progression model
+        progression_path = self.models_dir / "parathyroid_progression_lstm_model.pth"
+        progression_scaler_path = self.models_dir / "parathyroid_progression_scaler.pkl"
+        progression_encoder_path = self.models_dir / "parathyroid_progression_encoder.pkl"
+        progression_features_path = self.models_dir / "parathyroid_progression_features.json"
+        if progression_path.exists() and progression_scaler_path.exists() and progression_encoder_path.exists():
+            model, checkpoint = load_lstm_model(str(progression_path), device='cpu', model_type='parathyroid')
+            if model is not None:
+                self.models['parathyroid']['progression'] = {
+                    'model': model,
+                    'checkpoint': checkpoint
+                }
+                self.models['parathyroid']['progression_scaler'] = joblib.load(progression_scaler_path)
+                self.models['parathyroid']['progression_encoder'] = joblib.load(progression_encoder_path)
+                print("  ✅ Parathyroid progression model loaded")
+
+                if progression_features_path.exists():
+                    with open(progression_features_path, 'r') as f:
+                        features = json.load(f)
+                    self.models['parathyroid']['progression_config'] = {
+                        'features': features,
+                        'max_length': 20
+                    }
+                    print("  ✅ Parathyroid progression config loaded")
+
+        if self.models['parathyroid']['diagnosis'] == "rule_based" or self.models['parathyroid']['progression'] == "rule_based":
+            print("  ⚠️  Using rule-based fallback for missing parathyroid model artifacts")
+
+    def _normalize_parathyroid_features(self, patient_data: Dict[str, float]) -> Dict[str, float]:
+        """Normalize common aliases for parathyroid-related lab features."""
+        aliases = {
+            'pth': ['parathyroid_hormone', 'intact_pth', 'iPTH'],
+            'calcium': ['serum_calcium', 'ca'],
+            'phosphorus': ['phosphate', 'serum_phosphorus'],
+            'vitamin_d': ['vitamin_d_25oh', 'vitamin_d_25_oh', 'vitamin_d3'],
+            'creatinine': ['serum_creatinine', 'cr'],
+            'egfr': ['e_gfr', 'estimated_gfr'],
+            'alkaline_phosphatase': ['alp', 'alk_phos']
+        }
+
+        normalized = dict(patient_data)
+        for canonical, keys in aliases.items():
+            if canonical in normalized:
+                continue
+            for key in keys:
+                if key in normalized:
+                    normalized[canonical] = normalized[key]
+                    break
+        return normalized
     
     def predict_diabetes_diagnosis(self, patient_data: Dict[str, float]) -> Dict[str, Any]:
         """Predict diabetes diagnosis from single visit data"""
@@ -527,6 +605,213 @@ class MultiDiseaseInference:
             'probabilities': prob_dict,
             'num_visits': len(patient_sequence)
         }
+
+    def predict_parathyroid_diagnosis(self, patient_data: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Rule-based parathyroid diagnosis using typical endocrine lab patterns.
+        """
+        if not self._models_loaded:
+            self.load_models()
+
+        data = self._normalize_parathyroid_features(patient_data)
+
+        # ML-first path (if trained artifacts are available)
+        model = self.models['parathyroid'].get('diagnosis')
+        encoder = self.models['parathyroid'].get('diagnosis_encoder')
+        if model not in (None, "rule_based") and encoder is not None:
+            features = self.models['parathyroid'].get('diagnosis_features', [
+                'pth', 'calcium', 'phosphorus', 'vitamin_d',
+                'creatinine', 'egfr', 'alkaline_phosphatase', 'albumin'
+            ])
+            X = np.array([[data.get(f, 0.0) for f in features]])
+            prediction = model.predict(X)[0]
+            probabilities = model.predict_proba(X)[0]
+            class_names = encoder.classes_
+            prob_dict = {str(cls): float(probabilities[i]) for i, cls in enumerate(class_names)}
+            diagnosis = str(encoder.inverse_transform([prediction])[0])
+            return {
+                'diagnosis': diagnosis,
+                'confidence': float(max(probabilities)),
+                'probabilities': prob_dict,
+                'input_features': data,
+                'model_used': 'xgb_parathyroid_v1'
+            }
+
+        pth = float(data.get('pth', 0.0))
+        calcium = float(data.get('calcium', 0.0))
+        phosphorus = float(data.get('phosphorus', 0.0))
+        vitamin_d = float(data.get('vitamin_d', 0.0))
+        egfr = float(data.get('egfr', 0.0))
+
+        diagnosis = "Normal Parathyroid Function"
+        confidence = 0.65
+        probabilities = {
+            "Normal Parathyroid Function": 0.2,
+            "Possible Primary Hyperparathyroidism": 0.2,
+            "Possible Secondary Hyperparathyroidism": 0.2,
+            "Possible Hypoparathyroidism": 0.2,
+            "Indeterminate Parathyroid Pattern": 0.2,
+        }
+
+        # Heuristic thresholds (prototype-level rules for pilot support)
+        if pth > 65 and calcium > 10.2:
+            diagnosis = "Possible Primary Hyperparathyroidism"
+            confidence = 0.86
+            probabilities = {
+                "Normal Parathyroid Function": 0.03,
+                "Possible Primary Hyperparathyroidism": 0.86,
+                "Possible Secondary Hyperparathyroidism": 0.07,
+                "Possible Hypoparathyroidism": 0.01,
+                "Indeterminate Parathyroid Pattern": 0.03,
+            }
+        elif pth > 65 and (calcium <= 10.2) and (vitamin_d < 30 or egfr < 60):
+            diagnosis = "Possible Secondary Hyperparathyroidism"
+            confidence = 0.84
+            probabilities = {
+                "Normal Parathyroid Function": 0.03,
+                "Possible Primary Hyperparathyroidism": 0.06,
+                "Possible Secondary Hyperparathyroidism": 0.84,
+                "Possible Hypoparathyroidism": 0.02,
+                "Indeterminate Parathyroid Pattern": 0.05,
+            }
+        elif pth < 15 and calcium < 8.5:
+            diagnosis = "Possible Hypoparathyroidism"
+            confidence = 0.82
+            probabilities = {
+                "Normal Parathyroid Function": 0.04,
+                "Possible Primary Hyperparathyroidism": 0.01,
+                "Possible Secondary Hyperparathyroidism": 0.04,
+                "Possible Hypoparathyroidism": 0.82,
+                "Indeterminate Parathyroid Pattern": 0.09,
+            }
+        elif 15 <= pth <= 65 and 8.5 <= calcium <= 10.2 and 2.5 <= phosphorus <= 4.5:
+            diagnosis = "Normal Parathyroid Function"
+            confidence = 0.78
+            probabilities = {
+                "Normal Parathyroid Function": 0.78,
+                "Possible Primary Hyperparathyroidism": 0.05,
+                "Possible Secondary Hyperparathyroidism": 0.07,
+                "Possible Hypoparathyroidism": 0.03,
+                "Indeterminate Parathyroid Pattern": 0.07,
+            }
+        else:
+            diagnosis = "Indeterminate Parathyroid Pattern"
+            confidence = 0.58
+            probabilities = {
+                "Normal Parathyroid Function": 0.14,
+                "Possible Primary Hyperparathyroidism": 0.18,
+                "Possible Secondary Hyperparathyroidism": 0.26,
+                "Possible Hypoparathyroidism": 0.07,
+                "Indeterminate Parathyroid Pattern": 0.35,
+            }
+
+        return {
+            'diagnosis': diagnosis,
+            'confidence': confidence,
+            'probabilities': probabilities,
+            'input_features': data,
+            'model_used': 'rule_based_parathyroid_v1'
+        }
+
+    def predict_parathyroid_progression(self, patient_sequence: List[Dict[str, float]]) -> Dict[str, Any]:
+        """
+        Rule-based progression trend for parathyroid disorder monitoring.
+        """
+        if not self._models_loaded:
+            self.load_models()
+
+        if not patient_sequence:
+            raise ValueError("Patient sequence cannot be empty")
+
+        normalized_seq = [self._normalize_parathyroid_features(v) for v in patient_sequence]
+
+        # ML-first path (if trained artifacts are available)
+        progression_bundle = self.models['parathyroid'].get('progression')
+        scaler = self.models['parathyroid'].get('progression_scaler')
+        encoder = self.models['parathyroid'].get('progression_encoder')
+        config = self.models['parathyroid'].get('progression_config', {})
+        if isinstance(progression_bundle, dict) and scaler is not None and encoder is not None:
+            model = progression_bundle['model']
+            features = config.get('features', [
+                'pth', 'calcium', 'phosphorus', 'vitamin_d',
+                'creatinine', 'egfr', 'alkaline_phosphatase', 'albumin'
+            ])
+            max_length = config.get('max_length', 20)
+            sequence = [[visit.get(f, 0.0) for f in features] for visit in normalized_seq]
+            X = pad_sequences([sequence], maxlen=max_length, dtype='float32', padding='pre', truncating='pre')
+            X_flat = X.reshape(-1, X.shape[-1])
+            X_scaled = scaler.transform(X_flat).reshape(X.shape)
+            X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+
+            with torch.no_grad():
+                outputs = model(X_tensor)
+                probabilities = torch.softmax(outputs, dim=1).numpy()[0]
+                prediction = torch.argmax(outputs, dim=1).item()
+
+            progression_classes = encoder.classes_
+            prob_dict = {str(cls): float(probabilities[i]) for i, cls in enumerate(progression_classes)}
+            return {
+                'progression': str(progression_classes[prediction]),
+                'confidence': float(max(probabilities)),
+                'probabilities': prob_dict,
+                'num_visits': len(normalized_seq),
+                'model_used': 'lstm_parathyroid_progression_v1'
+            }
+
+        if len(normalized_seq) < 2:
+            return {
+                'progression': 'Insufficient Data',
+                'confidence': 0.5,
+                'probabilities': {
+                    'Improving': 0.15,
+                    'Stable': 0.70,
+                    'Worsening': 0.15,
+                },
+                'num_visits': len(normalized_seq),
+                'model_used': 'rule_based_parathyroid_v1'
+            }
+
+        first = normalized_seq[0]
+        last = normalized_seq[-1]
+
+        first_pth = float(first.get('pth', 0.0))
+        last_pth = float(last.get('pth', 0.0))
+        first_ca = float(first.get('calcium', 0.0))
+        last_ca = float(last.get('calcium', 0.0))
+
+        trend_score = 0
+        if first_pth and last_pth:
+            if last_pth < first_pth * 0.9:
+                trend_score += 1
+            elif last_pth > first_pth * 1.1:
+                trend_score -= 1
+
+        if first_ca and last_ca:
+            if abs(last_ca - 9.2) < abs(first_ca - 9.2):
+                trend_score += 1
+            elif abs(last_ca - 9.2) > abs(first_ca - 9.2):
+                trend_score -= 1
+
+        if trend_score >= 1:
+            progression = "Improving"
+            probabilities = {'Improving': 0.78, 'Stable': 0.18, 'Worsening': 0.04}
+            confidence = 0.78
+        elif trend_score <= -1:
+            progression = "Worsening"
+            probabilities = {'Improving': 0.05, 'Stable': 0.23, 'Worsening': 0.72}
+            confidence = 0.72
+        else:
+            progression = "Stable"
+            probabilities = {'Improving': 0.16, 'Stable': 0.68, 'Worsening': 0.16}
+            confidence = 0.68
+
+        return {
+            'progression': progression,
+            'confidence': confidence,
+            'probabilities': probabilities,
+            'num_visits': len(normalized_seq),
+            'model_used': 'rule_based_parathyroid_v1'
+        }
     
     def predict_diagnosis(self, disease_name: str, patient_data: Dict[str, float]) -> Dict[str, Any]:
         """
@@ -554,7 +839,12 @@ class MultiDiseaseInference:
             'chronic_kidney_disease': 'ckd',
             'chronic kidney disease': 'ckd',
             'kidney_disease': 'ckd',
-            'kidney disease': 'ckd'
+            'kidney disease': 'ckd',
+            'parathyroid': 'parathyroid',
+            'parathyroid_disorder': 'parathyroid',
+            'parathyroid disorder': 'parathyroid',
+            'hyperparathyroidism': 'parathyroid',
+            'hypoparathyroidism': 'parathyroid'
         }
         
         disease_key = disease_map.get(disease_name, disease_name)
@@ -569,6 +859,8 @@ class MultiDiseaseInference:
             return self.predict_anemia_diagnosis(patient_data)
         elif disease_key == 'ckd':
             return self.predict_ckd_diagnosis(patient_data)
+        elif disease_key == 'parathyroid':
+            return self.predict_parathyroid_diagnosis(patient_data)
         else:
             raise ValueError(f"Prediction not implemented for disease: {disease_name}")
     
@@ -598,7 +890,12 @@ class MultiDiseaseInference:
             'chronic_kidney_disease': 'ckd',
             'chronic kidney disease': 'ckd',
             'kidney_disease': 'ckd',
-            'kidney disease': 'ckd'
+            'kidney disease': 'ckd',
+            'parathyroid': 'parathyroid',
+            'parathyroid_disorder': 'parathyroid',
+            'parathyroid disorder': 'parathyroid',
+            'hyperparathyroidism': 'parathyroid',
+            'hypoparathyroidism': 'parathyroid'
         }
         
         disease_key = disease_map.get(disease_name, disease_name)
@@ -613,6 +910,8 @@ class MultiDiseaseInference:
             return self.predict_anemia_progression(patient_sequence)
         elif disease_key == 'ckd':
             return self.predict_ckd_progression(patient_sequence)
+        elif disease_key == 'parathyroid':
+            return self.predict_parathyroid_progression(patient_sequence)
         else:
             raise ValueError(f"Progression prediction not implemented for disease: {disease_name}")
     
@@ -643,7 +942,12 @@ class MultiDiseaseInference:
             'chronic_kidney_disease': 'ckd',
             'chronic kidney disease': 'ckd',
             'kidney_disease': 'ckd',
-            'kidney disease': 'ckd'
+            'kidney disease': 'ckd',
+            'parathyroid': 'parathyroid',
+            'parathyroid_disorder': 'parathyroid',
+            'parathyroid disorder': 'parathyroid',
+            'hyperparathyroidism': 'parathyroid',
+            'hypoparathyroidism': 'parathyroid'
         }
         
         disease_key = disease_map.get(disease_name, disease_name)
@@ -683,6 +987,16 @@ class MultiDiseaseInference:
                 'calcium', 'phosphorus', 'hemoglobin', 'pth', 'bicarbonate',
                 'albumin', 'bmi', 'systolic_bp', 'diastolic_bp'
             ]
+        elif disease_key == 'parathyroid' and prediction_type == 'diagnosis':
+            return [
+                'pth', 'calcium', 'phosphorus', 'vitamin_d',
+                'creatinine', 'egfr', 'alkaline_phosphatase', 'albumin'
+            ]
+        elif disease_key == 'parathyroid' and prediction_type == 'progression':
+            return [
+                'pth', 'calcium', 'phosphorus', 'vitamin_d',
+                'creatinine', 'egfr', 'alkaline_phosphatase', 'albumin'
+            ]
         else:
             raise ValueError(f"Features not available for {disease_name} {prediction_type}")
     
@@ -700,6 +1014,10 @@ class MultiDiseaseInference:
             'ckd': {
                 'diagnosis_loaded': 'diagnosis' in self.models['ckd'],
                 'progression_loaded': 'progression' in self.models['ckd'],
+            },
+            'parathyroid': {
+                'diagnosis_loaded': 'diagnosis' in self.models['parathyroid'],
+                'progression_loaded': 'progression' in self.models['parathyroid'],
             },
             'models_loaded': self._models_loaded,
             'supported_diseases': self.get_supported_diseases()

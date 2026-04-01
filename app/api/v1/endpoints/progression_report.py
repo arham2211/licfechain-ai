@@ -12,12 +12,52 @@ from uuid import UUID
 from app.db.session import get_db
 from app.schemas.disease import ProgressionReport
 from app.services.progression_report_service import ProgressionReportService
+from app.services.translation import translate_text
+from app.api.v1.dependencies import get_translation_language
 from app.models import Patient
 
 router = APIRouter()
 
 # Initialize progression report service
 progression_service = ProgressionReportService()
+
+_TRANSLATION_SKIP_KEYS = {
+    "patient_id",
+    "relative_id",
+    "assessment_date",
+    "prediction_date",
+    "generated_at",
+    "date",
+    "visit_date",
+    "diagnosed_at",
+    "assessed_date",
+    "diagnosis_date",
+    "timestamp",
+}
+
+
+async def _translate_payload(payload: Any, lang: str, parent_key: Optional[str] = None) -> Any:
+    if lang == "en" or payload is None:
+        return payload
+
+    if isinstance(payload, str):
+        if parent_key in _TRANSLATION_SKIP_KEYS:
+            return payload
+        return await translate_text(payload, lang, "medical")
+
+    if isinstance(payload, list):
+        translated = []
+        for item in payload:
+            translated.append(await _translate_payload(item, lang, parent_key))
+        return translated
+
+    if isinstance(payload, dict):
+        translated_dict = {}
+        for key, value in payload.items():
+            translated_dict[key] = await _translate_payload(value, lang, key)
+        return translated_dict
+
+    return payload
 
 @router.get("/patient/{patient_id}/progression-report", response_model=ProgressionReport)
 async def get_progression_report(
@@ -60,6 +100,7 @@ async def get_progression_timeline(
     patient_id: UUID,
     disease_name: str = Query(..., description="Name of the disease"),
     months_back: int = Query(12, ge=1, le=60, description="Number of months to look back"),
+    lang: str = Depends(get_translation_language),
     db: AsyncSession = Depends(get_db)
 ):
     """Get progression timeline data for visualization"""
@@ -72,9 +113,9 @@ async def get_progression_timeline(
         )
         
         if not timeline_data:
-            raise HTTPException(status_code=404, detail="No progression timeline data found")
+            return []
         
-        return timeline_data
+        return await _translate_payload(timeline_data, lang)
     
     except HTTPException:
         raise
@@ -84,6 +125,7 @@ async def get_progression_timeline(
 @router.get("/patient/{patient_id}/risk-assessment")
 async def get_risk_assessment(
     patient_id: UUID,
+    lang: str = Depends(get_translation_language),
     db: AsyncSession = Depends(get_db)
 ):
     """Get risk assessment for a patient based on blood relatives' diseases"""
@@ -96,7 +138,7 @@ async def get_risk_assessment(
         if not risk_data:
             raise HTTPException(status_code=404, detail="No risk assessment data found")
         
-        return risk_data
+        return await _translate_payload(risk_data, lang)
     
     except HTTPException:
         raise
@@ -106,6 +148,7 @@ async def get_risk_assessment(
 @router.get("/patient/{patient_id}/recommendations")
 async def get_recommendations(
     patient_id: UUID,
+    lang: str = Depends(get_translation_language),
     db: AsyncSession = Depends(get_db)
 ):
     """Get AI-powered personalized recommendations for a patient based on all conditions and future predictions"""
@@ -118,7 +161,7 @@ async def get_recommendations(
         if "error" in recommendations:
             raise HTTPException(status_code=404, detail=recommendations.get("error", "Unable to generate recommendations"))
         
-        return recommendations
+        return await _translate_payload(recommendations, lang)
     
     except HTTPException:
         raise
@@ -150,6 +193,7 @@ async def get_family_disease_history(
 async def predict_future_progression(
     patient_id: UUID,
     months_ahead: int = Query(6, ge=1, le=24, description="Number of months to predict ahead"),
+    lang: str = Depends(get_translation_language),
     db: AsyncSession = Depends(get_db)
 ):
     """Predict future progression for a patient across all detected conditions"""
@@ -163,7 +207,7 @@ async def predict_future_progression(
         if not prediction or "error" in prediction:
             raise HTTPException(status_code=404, detail=prediction.get("error", "No data available for prediction"))
         
-        return prediction
+        return await _translate_payload(prediction, lang)
     
     except HTTPException:
         raise

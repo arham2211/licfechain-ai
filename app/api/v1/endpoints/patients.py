@@ -895,6 +895,13 @@ async def get_family_disease_history(
         
         progressions_result = await db.execute(progressions_query)
         progressions_data = progressions_result.scalars().all()
+
+        # Get all records from FamilyDiseaseHistory table (directly seeded data)
+        family_history_query = select(FamilyDiseaseHistory).where(
+            FamilyDiseaseHistory.patient_id.in_(relative_ids)
+        )
+        family_history_result = await db.execute(family_history_query)
+        family_history_data = family_history_result.scalars().all()
         
         # Group diagnoses by patient_id
         diagnoses_by_patient = {}
@@ -940,6 +947,19 @@ async def get_family_disease_history(
                 "ml_model_used": prog.ml_model_used,
                 "notes": prog.notes,
                 "source": "progression"
+            })
+
+        # Add FamilyDiseaseHistory records
+        for fh in family_history_data:
+            pid = str(fh.patient_id)
+            if pid not in diagnoses_by_patient:
+                diagnoses_by_patient[pid] = []
+            diagnoses_by_patient[pid].append({
+                "disease_name": fh.disease_name,
+                "diagnosis_date": fh.diagnosed_at.isoformat() if fh.diagnosed_at else None,
+                "severity": fh.severity.value if hasattr(fh.severity, 'value') else fh.severity,
+                "notes": fh.notes,
+                "source": "family_history"
             })
         
         # Build final response - include ALL relatives (even if no diseases)

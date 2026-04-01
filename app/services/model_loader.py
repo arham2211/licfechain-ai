@@ -1,6 +1,6 @@
 """
 Model loading utilities to handle PyTorch model loading with custom classes
-Supports Diabetes, Iron Deficiency Anemia, and CKD models
+Supports Diabetes, Iron Deficiency Anemia, CKD, and Parathyroid models
 """
 
 import sys
@@ -100,6 +100,40 @@ class CKDProgressionBiLSTM(nn.Module):
         out = self.fc3(out)
         return out
 
+
+class ParathyroidProgressionBiLSTM(nn.Module):
+    """Parathyroid Disorder Progression BiLSTM Model"""
+    def __init__(self, input_size, hidden_size=32, num_layers=2, num_classes=3, dropout=0.4):
+        super(ParathyroidProgressionBiLSTM, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+
+        self.lstm = nn.LSTM(
+            input_size,
+            hidden_size,
+            num_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout if num_layers > 1 else 0.0
+        )
+        self.fc1 = nn.Linear(hidden_size * 2, 32)
+        self.dropout1 = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(32, 16)
+        self.dropout2 = nn.Dropout(dropout * 0.8)
+        self.fc3 = nn.Linear(16, num_classes)
+
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = out[:, -1, :]
+        out = self.fc1(out)
+        out = torch.relu(out)
+        out = self.dropout1(out)
+        out = self.fc2(out)
+        out = torch.relu(out)
+        out = self.dropout2(out)
+        out = self.fc3(out)
+        return out
+
 def load_lstm_model(model_path: str, device: str = 'cpu', model_type: str = 'diabetes'):
     """Load the LSTM model with proper class availability
     
@@ -114,6 +148,7 @@ def load_lstm_model(model_path: str, device: str = 'cpu', model_type: str = 'dia
         __main__.ProgressionBiLSTM = ProgressionBiLSTM
         __main__.AnemiaProgressionBiLSTM = AnemiaProgressionBiLSTM
         __main__.CKDProgressionBiLSTM = CKDProgressionBiLSTM
+        __main__.ParathyroidProgressionBiLSTM = ParathyroidProgressionBiLSTM
         
         # Load the checkpoint
         checkpoint_data = torch.load(model_path, map_location=device, weights_only=False)
@@ -123,6 +158,8 @@ def load_lstm_model(model_path: str, device: str = 'cpu', model_type: str = 'dia
             ModelClass = AnemiaProgressionBiLSTM
         elif model_type == 'ckd':
             ModelClass = CKDProgressionBiLSTM
+        elif model_type == 'parathyroid':
+            ModelClass = ParathyroidProgressionBiLSTM
         else:
             ModelClass = ProgressionBiLSTM
         
@@ -138,6 +175,14 @@ def load_lstm_model(model_path: str, device: str = 'cpu', model_type: str = 'dia
                     checkpoint.get('num_layers', 2),
                     checkpoint.get('num_classes', 6),  # 6 progression outcomes
                     checkpoint.get('dropout', 0.6)
+                )
+            elif model_type == 'parathyroid':
+                model = ModelClass(
+                    checkpoint.get('input_size', 8),
+                    checkpoint.get('hidden_size', 32),
+                    checkpoint.get('num_layers', 2),
+                    checkpoint.get('num_classes', 3),
+                    checkpoint.get('dropout', 0.4)
                 )
             else:
                 model = ModelClass(
@@ -174,6 +219,22 @@ def load_lstm_model(model_path: str, device: str = 'cpu', model_type: str = 'dia
                     'num_layers': 2,
                     'num_classes': 6,
                     'dropout': 0.6
+                }
+            elif model_type == 'parathyroid':
+                model = ModelClass(
+                    input_size=8,
+                    hidden_size=32,
+                    num_layers=2,
+                    num_classes=3,
+                    dropout=0.4
+                )
+                model.load_state_dict(checkpoint_data)
+                checkpoint = {
+                    'input_size': 8,
+                    'hidden_size': 32,
+                    'num_layers': 2,
+                    'num_classes': 3,
+                    'dropout': 0.4
                 }
             else:
                 raise ValueError(f"Unexpected checkpoint format for {model_type}")

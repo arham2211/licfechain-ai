@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+frontend/node_modules/
+frontend/.next/
+*.db
+data generation/
+model_training/
+.env.local

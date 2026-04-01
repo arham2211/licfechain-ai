@@ -110,6 +110,11 @@ async def create_lab_report(
         
         # Create report
         report_data = report.dict()
+        
+        # Ensure report_date is naive (no timezone) to match database/model expectations
+        if report_data.get("report_date") and report_data["report_date"].tzinfo:
+            report_data["report_date"] = report_data["report_date"].replace(tzinfo=None)
+            
         db_report = LabReport(**report_data)
         db.add(db_report)
         await db.commit()
@@ -312,6 +317,11 @@ async def create_lab_test_result(
         # Create test result
         db_test_result = LabTestResult(report_id=report_id, **test_data)
         db.add(db_test_result)
+        
+        # Auto-update report status to COMPLETED as soon as a result is added
+        if db_report.status != "completed":
+            db_report.status = "completed"
+            
         await db.commit()
         await db.refresh(db_test_result)
         

@@ -142,6 +142,21 @@ def _map_diagnosis_to_progression_stage(disease_name: str, diagnosis: str) -> st
             return "Severe"
         else:
             return diagnosis  # Use diagnosis as-is
+
+    # Parathyroid progression stages
+    elif 'parathyroid' in disease_lower:
+        if 'normal' in diagnosis_lower:
+            return "Normal"
+        elif 'primary' in diagnosis_lower:
+            return "Primary Hyperparathyroidism"
+        elif 'secondary' in diagnosis_lower:
+            return "Secondary Hyperparathyroidism"
+        elif 'hypoparathyroidism' in diagnosis_lower:
+            return "Hypoparathyroidism"
+        elif 'indeterminate' in diagnosis_lower:
+            return "Indeterminate"
+        else:
+            return diagnosis  # Use diagnosis as-is
     
     # Default: use diagnosis as progression stage
     return diagnosis
@@ -180,6 +195,8 @@ async def auto_create_diagnosis(
         model_name = 'xgb_anemia_v1'
     elif 'ckd' in disease_lower or 'kidney' in disease_lower:
         model_name = 'xgb_ckd_v1'
+    elif 'parathyroid' in disease_lower:
+        model_name = 'rule_based_parathyroid_v1'
     
     # Get diagnosis result
     diagnosis_result = prediction_result.get('diagnosis', 'Unknown')
@@ -316,6 +333,7 @@ async def predict_diagnosis(
     - diabetes (or 'diabetic')
     - anemia (or 'iron_deficiency_anemia', 'iron deficiency anemia', 'ida')
     - ckd (or 'chronic_kidney_disease', 'chronic kidney disease', 'kidney_disease')
+    - parathyroid (or 'parathyroid disorder', 'hyperparathyroidism', 'hypoparathyroidism')
     
     **Example for diabetes:**
     ```json
@@ -429,6 +447,7 @@ async def predict_progression(
     **Supported diseases:**
     - anemia (or 'iron_deficiency_anemia', 'iron deficiency anemia', 'ida')
     - ckd (or 'chronic_kidney_disease', 'chronic kidney disease', 'kidney_disease')
+    - parathyroid (or 'parathyroid disorder', 'hyperparathyroidism', 'hypoparathyroidism')
     
     **Example for anemia:**
     ```json
@@ -786,7 +805,9 @@ async def health_check():
         models_loaded = (
             info['diabetes'].get('diagnosis_loaded', False) or info['diabetes'].get('progression_loaded', False) or
             info['anemia'].get('diagnosis_loaded', False) or info['anemia'].get('progression_loaded', False) or
-            info['ckd'].get('diagnosis_loaded', False) or info['ckd'].get('progression_loaded', False)
+            info['ckd'].get('diagnosis_loaded', False) or info['ckd'].get('progression_loaded', False) or
+            info.get('parathyroid', {}).get('diagnosis_loaded', False) or
+            info.get('parathyroid', {}).get('progression_loaded', False)
         )
         
         if not models_loaded:

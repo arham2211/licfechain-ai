@@ -49,6 +49,7 @@ class LabReportBase(BaseModel):
     status: str = Field(..., pattern='^(pending|completed)$')
     pdf_url: Optional[str] = Field(None, max_length=500)
     test_name: Optional[str] = Field(None, max_length=200, description="Test name for this report (e.g., 'hba1c', 'fasting_glucose')")
+    performed_by: Optional[str] = Field(None, max_length=200, description="Name of the lab technician who performed the test")
 
 
 class LabReportCreate(LabReportBase):
@@ -61,6 +62,7 @@ class LabReportUpdate(BaseModel):
     report_type: Optional[str] = Field(None, min_length=1, max_length=100)
     status: Optional[str] = Field(None, pattern='^(pending|completed)$')
     pdf_url: Optional[str] = Field(None, max_length=500)
+    performed_by: Optional[str] = Field(None, max_length=200)
 
 
 class LabReport(LabReportBase):

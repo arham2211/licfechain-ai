@@ -11,7 +11,12 @@ class Settings(BaseSettings):
 
     # Security
     SECRET_KEY: str = "changeme"
+    JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 14
+    JWT_ISSUER: str = "lifechain-api"
+    JWT_AUDIENCE: str = "lifechain-clients"
+    AUTH_COOKIE_SECURE: bool = False
 
     # CORS
     BACKEND_CORS_ORIGINS: list[str] = []

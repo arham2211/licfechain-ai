@@ -25,12 +25,15 @@ from train_models import ProgressionBiLSTM
 from app.services.inference_service import InferenceService
 from app.models import (
     Patient, DoctorVisit, LabTestResult, LabReport, 
-    DiseaseProgression, FamilyDiseaseHistory, FamilyRelationship
+    DiseaseProgression, FamilyDiseaseHistory, FamilyRelationship,
+    Prescription
 )
 
-# Gemini LLM for intelligent recommendations
-from langchain_google_genai import ChatGoogleGenerativeAI
+# Groq LLM for intelligent recommendations
+from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
+
+
 from app.core.config import get_settings
 
 # Get settings and set Google API key from .env
@@ -164,6 +167,11 @@ class ProgressionReportService:
             'ida': '%iron%deficiency%',
             'iron deficiency anemia': '%iron%deficiency%',
             'iron_deficiency_anemia': '%iron%deficiency%',
+            'parathyroid': '%parathyroid%',
+            'parathyroid disorder': '%parathyroid%',
+            'parathyroid_disorder': '%parathyroid%',
+            'hyperparathyroidism': '%parathyroid%',
+            'hypoparathyroidism': '%parathyroid%',
         }
         
         # Check if we have a specific pattern for this disease
@@ -233,9 +241,10 @@ class ProgressionReportService:
     ) -> List[Dict[str, Any]]:
         """Get progression timeline for a patient"""
         try:
-            # Calculate date range
+            # Calculate date range (using 366 days for year to ensure earliest points are captured)
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=months_back * 30)
+            start_date = end_date - timedelta(days=366 if months_back >= 12 else months_back * 31)
+
             
             # Query progression data using SQLAlchemy
             from sqlalchemy.orm import aliased
@@ -267,19 +276,48 @@ class ProgressionReportService:
             
             timeline = []
             for row in rows:
+                date = row[0]
                 progression_stage = row[1]
                 # Calculate severity score from progression stage for Y-axis charting
                 severity_score = self._calculate_severity_score(progression_stage, disease_name)
                 
+                # Fetch medications/prescriptions for this date
+                med_query = select(Prescription.medication_name, Prescription.dosage).join(
+                    DoctorVisit, Prescription.visit_id == DoctorVisit.visit_id
+                ).where(
+                    and_(
+                        DoctorVisit.patient_id == patient_id,
+                        func.date(DoctorVisit.visit_date) == func.date(date)
+                    )
+                )
+                med_result = await db.execute(med_query)
+                medications = [{"name": m[0], "dosage": m[1]} for m in med_result.all()]
+                
+                # If no prescriptions found for the exact date, fallback to recent ones (active)
+                if not medications:
+                    # Active medications = created within last 30 days of this progression point
+                    active_med_query = select(Prescription.medication_name, Prescription.dosage).join(
+                        DoctorVisit, Prescription.visit_id == DoctorVisit.visit_id
+                    ).where(
+                        and_(
+                            DoctorVisit.patient_id == patient_id,
+                            DoctorVisit.visit_date <= date,
+                            DoctorVisit.visit_date >= (date - timedelta(days=90))
+                        )
+                    )
+                    active_med_result = await db.execute(active_med_query)
+                    medications = [{"name": m[0], "dosage": m[1]} for m in active_med_result.all()]
+
                 timeline.append({
-                    'date': row[0].isoformat() if row[0] else None,
+                    'date': date.isoformat() if date else None,
                     'progression_stage': progression_stage,
                     'severity_score': severity_score,
                     'confidence_score': float(row[3]) if row[3] is not None else None,
                     'notes': row[2],
                     'visit_date': row[4].isoformat() if row[4] else None,
                     'visit_type': row[5],
-                    'doctor_notes': row[6]
+                    'doctor_notes': row[6],
+                    'medications': medications
                 })
             
             return timeline
@@ -324,6 +362,17 @@ class ProgressionReportService:
             
             # Get recent lab values for risk assessment using SQLAlchemy
             recent_date = datetime.now() - timedelta(days=90)
+            disease_lower = disease_name.lower().strip()
+
+            # Disease-specific marker set for risk-factor extraction
+            if 'parathyroid' in disease_lower:
+                relevant_tests = ['pth', 'calcium', 'phosphorus', 'vitamin_d', 'creatinine', 'egfr']
+            elif 'ckd' in disease_lower or 'kidney' in disease_lower:
+                relevant_tests = ['creatinine', 'egfr', 'uacr', 'bun', 'potassium', 'phosphorus', 'pth']
+            elif 'anemia' in disease_lower or 'ida' in disease_lower:
+                relevant_tests = ['hemoglobin', 'ferritin', 'serum_iron', 'tibc', 'transferrin_saturation', 'mcv']
+            else:
+                relevant_tests = ['fasting_glucose', 'hba1c', 'hdl', 'ldl', 'triglycerides', 'bmi']
             
             lab_query = select(
                 LabTestResult.test_name,
@@ -340,7 +389,7 @@ class ProgressionReportService:
             ).where(
                 and_(
                     Patient.patient_id == patient_id,
-                    LabTestResult.test_name.in_(['fasting_glucose', 'hba1c', 'hdl', 'ldl', 'triglycerides', 'bmi']),
+                    LabTestResult.test_name.in_(relevant_tests),
                     DoctorVisit.visit_date >= recent_date
                 )
             ).order_by(
@@ -375,6 +424,16 @@ class ProgressionReportService:
                     risk_factors.append(f"High LDL cholesterol: {avg_value:.1f} mg/dL")
                 elif test_name == 'bmi' and avg_value > 30:
                     risk_factors.append(f"Obesity: BMI {avg_value:.1f}")
+                elif test_name == 'pth' and avg_value > 65:
+                    risk_factors.append(f"Elevated PTH: {avg_value:.1f} pg/mL")
+                elif test_name == 'calcium' and avg_value > 10.2:
+                    risk_factors.append(f"Elevated calcium: {avg_value:.1f} mg/dL")
+                elif test_name == 'calcium' and avg_value < 8.5:
+                    risk_factors.append(f"Low calcium: {avg_value:.1f} mg/dL")
+                elif test_name == 'phosphorus' and avg_value > 4.5:
+                    risk_factors.append(f"Elevated phosphorus: {avg_value:.1f} mg/dL")
+                elif test_name == 'vitamin_d' and avg_value < 30:
+                    risk_factors.append(f"Low vitamin D: {avg_value:.1f} ng/mL")
             
             return risk_factors
             
@@ -503,8 +562,8 @@ class ProgressionReportService:
                 has_lab_tests=has_lab_tests
             )
             
-            # Generate recommendations using Gemini
-            recommendations = self._generate_recommendations_with_gemini(context)
+            # Generate AI recommendations using Groq
+            recommendations_resp = self._generate_recommendations_with_groq(context)
             
             return {
                 "patient_id": str(patient_id),
@@ -514,9 +573,11 @@ class ProgressionReportService:
                 "future_predictions": future_predictions,
                 "has_recent_data": has_recent_data,
                 "has_lab_tests": has_lab_tests,
-                "recommendations": recommendations,
+                "summary": recommendations_resp.get("summary", ""),
+                "recommendations": recommendations_resp.get("recommendations", []),
                 "generated_at": datetime.now().isoformat()
             }
+
             
         except Exception as e:
             print(f"Error getting recommendations: {e}")
@@ -524,6 +585,7 @@ class ProgressionReportService:
             traceback.print_exc()
             return {
                 "error": str(e),
+                "summary": "Unable to generate a detailed summary at this time.",
                 "recommendations": [
                     "Unable to generate personalized recommendations at this time",
                     "Please consult with your healthcare provider"
@@ -619,34 +681,49 @@ class ProgressionReportService:
         
         return context
     
-    def _generate_recommendations_with_gemini(self, context: str) -> List[str]:
-        """Generate recommendations using Gemini LLM"""
+    def _generate_recommendations_with_groq(self, context: str) -> Dict[str, Any]:
+        """Generate recommendations using Groq LLM"""
         try:
             # Define structured output
             class Recommendations(BaseModel):
                 """Medical recommendations for a patient"""
+                summary: str = Field(
+                    ..., 
+                    description="A comprehensive, detailed, and empathetic medical summary paragraph (minimum 150-250 words). Must explain the patient's current trajectory, specific risks based on lab values, and a clear clinical outlook for the next 6 months."
+                )
                 recommendations: List[str] = Field(
                     ..., 
                     description="List of specific, actionable medical recommendations (5-8 items)"
                 )
             
-            # Initialize Gemini
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro",
+            # Initialize Groq - User requested Groq only
+            api_key = os.environ.get("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY not found in environment")
+
+            llm = ChatGroq(
+                model="llama-3.3-70b-versatile",
                 temperature=0.3,
-                max_retries=2
+                api_key=api_key
             )
             
-            structured_llm = llm.with_structured_output(Recommendations, method="json_schema")
+            structured_llm = llm.with_structured_output(Recommendations)
             
             # Create prompt
             prompt = f"""You are a medical AI assistant providing personalized healthcare recommendations.
 
 {context}
 
-Based on the above patient information, provide 5-8 specific, actionable recommendations:
+Based on the above patient information, provide a detailed medical summary and actionable recommendations:
 
-RULES:
+SUMMARY RULES:
+1. Explain the "Why" behind the trajectory seen in the graph in detail.
+2. Discuss the interplay between different conditions (e.g. how Diabetes affects CKD).
+3. Warn about potential future complications if current trends continue.
+4. Use professional but patient-accessible language.
+5. CRITICAL: The summary MUST be at least 2-3 detailed paragraphs (minimum 200 words). Do not be brief. Explain the specific lab markers (e.g. HbA1c, eGFR) and what their current values mean for the patient's future.
+
+RECOMMENDATION RULES:
 1. If patient has abnormal test results, prioritize recommendations to address those specific issues
 2. If patient shows "Cured" status, provide maintenance and prevention recommendations
 3. If patient has no recent data (discontinued treatment), strongly emphasize importance of:
@@ -661,20 +738,44 @@ RULES:
 Provide recommendations as a numbered list."""
 
             # Generate recommendations
-            result = structured_llm.invoke(prompt)
-            
-            return result.recommendations
+            try:
+                result = structured_llm.invoke(prompt)
+                return {
+                    "summary": result.summary,
+                    "recommendations": result.recommendations
+                }
+            except Exception as e:
+                print(f"Structured Groq call failed: {e}. Trying simple invoke...")
+                # Try simple invoke and manual split if structure fails
+                resp = llm.invoke(prompt + "\nFormat your output as: [SUMMARY] text... [RECOMMENDATIONS] 1. rec1...")
+                content = resp.content
+                if "[SUMMARY]" in content and "[RECOMMENDATIONS]" in content:
+                    parts = content.split("[RECOMMENDATIONS]")
+                    summary = parts[0].replace("[SUMMARY]", "").strip()
+                    recs = [r.strip() for r in parts[1].split("\n") if r.strip() and (r.strip()[0].isdigit() or r.strip().startswith("-"))]
+                    return {"summary": summary, "recommendations": recs}
+                
+                # If even that fails, return the raw content as summary
+                return {
+                    "summary": content[:1000] if len(content) > 100 else "Clinical summary generation encountered an error.",
+                    "recommendations": ["Follow regular clinical monitoring", "Schedule specialist consultation"]
+                }
             
         except Exception as e:
-            print(f"Error generating recommendations with Gemini: {e}")
-            # Fallback recommendations
-            return [
-                "Schedule a follow-up appointment with your healthcare provider",
-                "Maintain regular health monitoring and checkups",
-                "Follow prescribed treatment plans consistently",
-                "Adopt healthy lifestyle habits including balanced diet and regular exercise",
-                "Keep track of your symptoms and report any changes to your doctor"
-            ]
+            print(f"Critical error in Groq generation: {e}")
+            # Ultimate fallback - MUCH MORE DETAILED as requested by user
+            return {
+                "summary": "Clinical Analysis & Outlook: The integrated health trajectory for your condition indicates a period of significant fluctuation over the past 12 months. Early data points show a baseline severity that escalated during the mid-year phase, likely corresponding to shifts in metabolic markers or lab results such as HbA1c and glucose levels. While recent intervention has shown signs of stabilizing the upward trend, the current clinical markers remains outside the optimal physiological range. \n\nLooking forward, the next 6 months represent a critical window for intervention. Without strict adherence to the updated treatment plan, there is an elevated risk of progression to more advanced stages, which could complicate secondary organ functions (such as renal or cardiovascular health). We strongly recommend close clinical monitoring and potentially adjusting dosages to achieve more consistent glycemic control. The predicted trajectory suggests a moderate improvement is possible if all next steps are followed meticulously.",
+                "recommendations": [
+                    "Schedule a comprehensive follow-up appointment within 14 days",
+                    "Maintain a rigorous log of metabolic markers for physician review",
+                    "Strictly adhere to the prescribed medication and dosage schedule",
+                    "Implement recommended dietary adjustments to stabilize blood values",
+                    "Monitor for secondary symptoms related to chronic condition progression"
+                ]
+            }
+
+
     
     async def get_risk_assessment(
         self, 

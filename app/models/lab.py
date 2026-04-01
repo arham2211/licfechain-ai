@@ -58,6 +58,7 @@ class LabReport(Base):
     )
     pdf_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     test_name: Mapped[str | None] = mapped_column(String(200), nullable=True)  # Test name for this report
+    performed_by: Mapped[str | None] = mapped_column(String(200), nullable=True)  # Lab technician name
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

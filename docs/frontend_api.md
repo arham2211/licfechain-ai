@@ -4,6 +4,13 @@ Audience: Frontend engineers building a multi-disease clinical app with timeline
 
 Base URL: `http://localhost:8001/api/v1`
 
+### Proposal Placeholder APIs (temporary adapters)
+
+These are intentionally temporary until full OCR and dental backend modules are completed:
+- `POST /proposal/ocr/ingest`
+- `POST /proposal/dental/analyze`
+- `GET /proposal/dental/progression/{patient_id}`
+
 ### User Roles & Access Control
 
 The system has **three distinct user roles** with different permissions:
@@ -26,11 +33,16 @@ The system has **three distinct user roles** with different permissions:
    - Cannot: View patient dashboards, recommendations, or modify clinical data
    - Access: Lab-related POST/PUT endpoints, lab report GET endpoints
 
-**Note**: The backend API doesn't enforce role-based access in the current implementation. Frontend should:
-- Implement role-based UI (show/hide features based on user role)
-- Store user role in authentication token/session
-- Validate permissions client-side before making API calls
-- Consider adding role-based middleware in backend for production
+Backend now enforces authenticated access with JWT bearer tokens and role checks.
+
+Auth endpoints:
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `GET /auth/me`
+
+Frontend should still keep role-based UI visibility and route guards for UX clarity.
 
 Conventions
 - All IDs are UUIDs.
