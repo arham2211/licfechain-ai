@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.endpoints import (
     auth, health, patients, doctors, visits, labs,
     proposal_placeholders,
-    unified_inference, progression_report
+    unified_inference, progression_report, translation
 )
 from app.api.v1.dependencies import get_current_user, require_roles
 
@@ -71,4 +71,11 @@ api_router.include_router(
     dependencies=[Depends(get_current_user), Depends(require_roles("admin", "doctor", "lab"))],
 )
 
+# Utility translation endpoints
+api_router.include_router(
+    translation.router,
+    prefix="/translation",
+    tags=["translation"],
+    dependencies=[Depends(get_current_user), Depends(require_roles("admin", "doctor", "patient", "lab"))],
+)
 

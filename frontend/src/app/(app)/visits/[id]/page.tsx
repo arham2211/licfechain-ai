@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
+import { useLanguage } from "@/components/providers/LanguageProvider";
 
 type Visit = {
     visit_id: string;
@@ -22,6 +23,7 @@ type Diagnosis = { diagnosis_id: string; disease_name: string; diagnosis_date: s
 type Prescription = { prescription_id: string; medication_name: string; dosage: string; frequency: string; duration_days?: number; instructions?: string };
 
 export default function VisitDetailPage() {
+    const { tr, language } = useLanguage();
     const params = useParams();
     const router = useRouter();
     const visitId = params.id as string;
@@ -49,7 +51,7 @@ export default function VisitDetailPage() {
 
     useEffect(() => {
         loadAll();
-    }, [visitId]);
+    }, [visitId, language]);
 
     async function loadAll() {
         try {
@@ -64,7 +66,7 @@ export default function VisitDetailPage() {
             setDiagnoses(d);
             setPrescriptions(p);
         } catch (e) {
-            setError(e instanceof Error ? e.message : "Failed to load visit");
+            setError(e instanceof Error ? e.message : tr("failedToLoadVisit"));
         }
     }
 
@@ -84,11 +86,11 @@ export default function VisitDetailPage() {
             });
             setShowSymptom(false);
             setSymptomForm({ symptom_name: "", severity: "", duration_days: "", notes: "" });
-            setSuccessMsg("Symptom added");
+            setSuccessMsg(tr("symptomAdded"));
             setTimeout(() => setSuccessMsg(null), 3000);
             await loadAll();
         } catch (e) {
-            setFormError(e instanceof Error ? e.message : "Failed to add symptom");
+            setFormError(e instanceof Error ? e.message : tr("failedToAddSymptom"));
         } finally {
             setSubmitting(false);
         }
@@ -112,11 +114,11 @@ export default function VisitDetailPage() {
             });
             setShowDiagnosis(false);
             setDiagnosisForm({ disease_name: "", diagnosis_date: new Date().toISOString().slice(0, 16), confidence_score: "", status: "suspected", notes: "", ml_model_used: "" });
-            setSuccessMsg("Diagnosis added");
+            setSuccessMsg(tr("diagnosisAdded"));
             setTimeout(() => setSuccessMsg(null), 3000);
             await loadAll();
         } catch (e) {
-            setFormError(e instanceof Error ? e.message : "Failed to add diagnosis");
+            setFormError(e instanceof Error ? e.message : tr("failedToAddDiagnosis"));
         } finally {
             setSubmitting(false);
         }
@@ -139,39 +141,39 @@ export default function VisitDetailPage() {
             });
             setShowPrescription(false);
             setPrescriptionForm({ medication_name: "", dosage: "", frequency: "", duration_days: "", instructions: "" });
-            setSuccessMsg("Prescription added");
+            setSuccessMsg(tr("prescriptionAdded"));
             setTimeout(() => setSuccessMsg(null), 3000);
             await loadAll();
         } catch (e) {
-            setFormError(e instanceof Error ? e.message : "Failed to add prescription");
+            setFormError(e instanceof Error ? e.message : tr("failedToAddPrescription"));
         } finally {
             setSubmitting(false);
         }
     }
 
     async function handleDeleteVisit() {
-        if (!confirm("Delete this visit and all related records?")) return;
+        if (!confirm(tr("confirmDeleteVisit"))) return;
         try {
             await api.request(`/visits/${visitId}`, { method: "DELETE" });
             router.push("/visits");
         } catch (e) {
-            setError(e instanceof Error ? e.message : "Failed to delete visit");
+            setError(e instanceof Error ? e.message : tr("failedToDeleteVisit"));
         }
     }
 
-    if (!visit && !error) return <div className="card p-4 text-muted">Loading visit...</div>;
-    if (error) return <div className="space-y-4"><PageHeader title="Visit Not Found" /><div className="card p-4 text-sm text-danger">{error}</div><button className="btn-primary" onClick={() => router.push("/visits")}>← Back</button></div>;
+    if (!visit && !error) return <div className="card p-4 text-muted">{tr("loadingVisit")}</div>;
+    if (error) return <div className="space-y-4"><PageHeader title={tr("visitNotFound")} /><div className="card p-4 text-sm text-danger">{error}</div><button className="btn-primary" onClick={() => router.push("/visits")}>← {tr("back")}</button></div>;
 
     return (
         <div className="space-y-4">
             <PageHeader
-                title={`Visit — ${visit!.visit_type.replace(/_/g, " ")}`}
+                title={`${tr("visit")} - ${visit!.visit_type.replace(/_/g, " ")}`}
                 subtitle={`${String(visit!.visit_date).slice(0, 16).replace("T", " ")}`}
                 right={
                     <div className="flex items-center gap-2">
-                        <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => router.push("/visits")}>← Back</button>
+                        <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => router.push("/visits")}>← {tr("back")}</button>
                         {canEdit && (
-                            <button className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" onClick={handleDeleteVisit}>Delete Visit</button>
+                            <button className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" onClick={handleDeleteVisit}>{tr("deleteVisit")}</button>
                         )}
                     </div>
                 }
@@ -182,18 +184,18 @@ export default function VisitDetailPage() {
             {/* Visit Details */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="card p-4">
-                    <h3 className="mb-3 font-semibold">Visit Information</h3>
+                    <h3 className="mb-3 font-semibold">{tr("visitInformation")}</h3>
                     <div className="space-y-2 text-sm">
-                        <div className="flex justify-between"><span className="text-muted">Patient ID</span><span className="text-xs">{visit!.patient_id}</span></div>
-                        <div className="flex justify-between"><span className="text-muted">Doctor ID</span><span className="text-xs">{visit!.doctor_patient_id}</span></div>
-                        <div className="flex justify-between"><span className="text-muted">Type</span><span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{visit!.visit_type}</span></div>
+                        <div className="flex justify-between"><span className="text-muted">{tr("patientId")}</span><span className="text-xs">{visit!.patient_id}</span></div>
+                        <div className="flex justify-between"><span className="text-muted">{tr("doctorId")}</span><span className="text-xs">{visit!.doctor_patient_id}</span></div>
+                        <div className="flex justify-between"><span className="text-muted">{tr("type")}</span><span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{visit!.visit_type}</span></div>
                     </div>
                 </div>
                 <div className="card p-4">
-                    <h3 className="mb-3 font-semibold">Clinical Notes</h3>
+                    <h3 className="mb-3 font-semibold">{tr("clinicalNotes")}</h3>
                     <div className="space-y-2 text-sm">
-                        <div><span className="text-muted">Chief Complaint:</span><p className="mt-1">{visit!.chief_complaint || "None recorded"}</p></div>
-                        <div><span className="text-muted">Doctor Notes:</span><p className="mt-1">{visit!.doctor_notes || "None recorded"}</p></div>
+                        <div><span className="text-muted">{tr("chiefComplaint")}:</span><p className="mt-1">{visit!.chief_complaint || tr("noneRecorded")}</p></div>
+                        <div><span className="text-muted">{tr("doctorNotes")}:</span><p className="mt-1">{visit!.doctor_notes || tr("noneRecorded")}</p></div>
                     </div>
                 </div>
             </div>
@@ -201,25 +203,25 @@ export default function VisitDetailPage() {
             {/* Symptoms Section */}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">Symptoms ({symptoms.length})</h3>
-                    {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowSymptom(true); setFormError(null); }}>+ Add Symptom</button>}
+                    <h3 className="font-semibold">{tr("symptoms")} ({symptoms.length})</h3>
+                    {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowSymptom(true); setFormError(null); }}>+ {tr("addSymptom")}</button>}
                 </div>
                 {showSymptom && (
                     <form className="mb-4 rounded-md border border-border p-4 space-y-3" onSubmit={addSymptom}>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div><label className="mb-1 block text-xs font-medium">Symptom Name *</label><input className="input" value={symptomForm.symptom_name} onChange={(e) => setSymptomForm({ ...symptomForm, symptom_name: e.target.value })} required placeholder="e.g., Fatigue" /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Severity (1-10)</label><input className="input" type="number" min="1" max="10" value={symptomForm.severity} onChange={(e) => setSymptomForm({ ...symptomForm, severity: e.target.value })} /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Duration (days)</label><input className="input" type="number" min="0" value={symptomForm.duration_days} onChange={(e) => setSymptomForm({ ...symptomForm, duration_days: e.target.value })} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("symptomName")} *</label><input className="input" value={symptomForm.symptom_name} onChange={(e) => setSymptomForm({ ...symptomForm, symptom_name: e.target.value })} required placeholder={tr("symptomNamePlaceholder")} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("severity")} (1-10)</label><input className="input" type="number" min="1" max="10" value={symptomForm.severity} onChange={(e) => setSymptomForm({ ...symptomForm, severity: e.target.value })} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("durationDays")}</label><input className="input" type="number" min="0" value={symptomForm.duration_days} onChange={(e) => setSymptomForm({ ...symptomForm, duration_days: e.target.value })} /></div>
                         </div>
-                        <div><label className="mb-1 block text-xs font-medium">Notes</label><input className="input" value={symptomForm.notes} onChange={(e) => setSymptomForm({ ...symptomForm, notes: e.target.value })} /></div>
+                        <div><label className="mb-1 block text-xs font-medium">{tr("notes")}</label><input className="input" value={symptomForm.notes} onChange={(e) => setSymptomForm({ ...symptomForm, notes: e.target.value })} /></div>
                         {formError && <p className="text-xs text-danger">{formError}</p>}
-                        <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowSymptom(false)}>Cancel</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? "Adding..." : "Add"}</button></div>
+                        <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowSymptom(false)}>{tr("cancel")}</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? tr("adding") : tr("add")}</button></div>
                     </form>
                 )}
-                {symptoms.length === 0 ? <p className="text-sm text-muted">No symptoms recorded</p> : (
+                {symptoms.length === 0 ? <p className="text-sm text-muted">{tr("noSymptomsRecorded")}</p> : (
                     <div className="space-y-2">{symptoms.map((s) => (
                         <div key={s.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                            <div><span className="font-medium">{s.symptom_name}</span>{s.severity ? <span className="ml-2 text-xs text-muted">Severity: {s.severity}/10</span> : null}{s.duration_days ? <span className="ml-2 text-xs text-muted">{s.duration_days}d</span> : null}</div>
+                            <div><span className="font-medium">{s.symptom_name}</span>{s.severity ? <span className="ml-2 text-xs text-muted">{tr("severity")}: {s.severity}/10</span> : null}{s.duration_days ? <span className="ml-2 text-xs text-muted">{s.duration_days}d</span> : null}</div>
                             {s.notes && <span className="text-xs text-muted">{s.notes}</span>}
                         </div>
                     ))}</div>
@@ -229,32 +231,32 @@ export default function VisitDetailPage() {
             {/* Diagnoses Section */}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">Diagnoses ({diagnoses.length})</h3>
-                    {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowDiagnosis(true); setFormError(null); }}>+ Add Diagnosis</button>}
+                    <h3 className="font-semibold">{tr("diagnoses")} ({diagnoses.length})</h3>
+                    {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowDiagnosis(true); setFormError(null); }}>+ {tr("addDiagnosis")}</button>}
                 </div>
                 {showDiagnosis && (
                     <form className="mb-4 rounded-md border border-border p-4 space-y-3" onSubmit={addDiagnosis}>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div><label className="mb-1 block text-xs font-medium">Disease Name *</label><input className="input" value={diagnosisForm.disease_name} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, disease_name: e.target.value })} required placeholder="e.g., Type 2 Diabetes" /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Status *</label><select className="input" value={diagnosisForm.status} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, status: e.target.value })}><option value="suspected">Suspected</option><option value="confirmed">Confirmed</option></select></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("diseaseName")} *</label><input className="input" value={diagnosisForm.disease_name} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, disease_name: e.target.value })} required placeholder={tr("diseaseNamePlaceholder")} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("status")} *</label><select className="input" value={diagnosisForm.status} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, status: e.target.value })}><option value="suspected">{tr("suspected")}</option><option value="confirmed">{tr("confirmed")}</option></select></div>
                         </div>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div><label className="mb-1 block text-xs font-medium">Date *</label><input className="input" type="datetime-local" value={diagnosisForm.diagnosis_date} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, diagnosis_date: e.target.value })} required /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Confidence (0-1)</label><input className="input" type="number" step="0.01" min="0" max="1" value={diagnosisForm.confidence_score} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, confidence_score: e.target.value })} /></div>
-                            <div><label className="mb-1 block text-xs font-medium">ML Model</label><input className="input" value={diagnosisForm.ml_model_used} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, ml_model_used: e.target.value })} placeholder="e.g., xgboost_v2" /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("date")} *</label><input className="input" type="datetime-local" value={diagnosisForm.diagnosis_date} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, diagnosis_date: e.target.value })} required /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("confidenceZeroOne")}</label><input className="input" type="number" step="0.01" min="0" max="1" value={diagnosisForm.confidence_score} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, confidence_score: e.target.value })} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("mlModel")}</label><input className="input" value={diagnosisForm.ml_model_used} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, ml_model_used: e.target.value })} placeholder={tr("mlModelPlaceholder")} /></div>
                         </div>
-                        <div><label className="mb-1 block text-xs font-medium">Notes</label><textarea className="input min-h-[60px]" value={diagnosisForm.notes} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, notes: e.target.value })} /></div>
+                        <div><label className="mb-1 block text-xs font-medium">{tr("notes")}</label><textarea className="input min-h-[60px]" value={diagnosisForm.notes} onChange={(e) => setDiagnosisForm({ ...diagnosisForm, notes: e.target.value })} /></div>
                         {formError && <p className="text-xs text-danger">{formError}</p>}
-                        <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowDiagnosis(false)}>Cancel</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? "Adding..." : "Add"}</button></div>
+                        <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowDiagnosis(false)}>{tr("cancel")}</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? tr("adding") : tr("add")}</button></div>
                     </form>
                 )}
-                {diagnoses.length === 0 ? <p className="text-sm text-muted">No diagnoses recorded</p> : (
+                {diagnoses.length === 0 ? <p className="text-sm text-muted">{tr("noDiagnosesRecorded")}</p> : (
                     <div className="space-y-2">{diagnoses.map((d) => (
                         <div key={d.diagnosis_id} className="rounded-md border border-border px-3 py-2 text-sm">
                             <div className="flex items-center gap-2">
                                 <span className="font-medium">{d.disease_name}</span>
                                 <span className={`rounded-full px-2 py-0.5 text-xs ${d.status === "confirmed" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"}`}>{d.status}</span>
-                                {d.confidence_score != null && <span className="text-xs text-muted">{(d.confidence_score * 100).toFixed(0)}% confidence</span>}
+                                {d.confidence_score != null && <span className="text-xs text-muted">{(d.confidence_score * 100).toFixed(0)}% {tr("confidence")}</span>}
                             </div>
                             {d.notes && <p className="mt-1 text-xs text-muted">{d.notes}</p>}
                         </div>
@@ -265,25 +267,25 @@ export default function VisitDetailPage() {
             {/* Prescriptions Section */}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">Prescriptions ({prescriptions.length})</h3>
-                    {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowPrescription(true); setFormError(null); }}>+ Add Prescription</button>}
+                    <h3 className="font-semibold">{tr("prescriptions")} ({prescriptions.length})</h3>
+                    {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowPrescription(true); setFormError(null); }}>+ {tr("addPrescription")}</button>}
                 </div>
                 {showPrescription && (
                     <form className="mb-4 rounded-md border border-border p-4 space-y-3" onSubmit={addPrescription}>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div><label className="mb-1 block text-xs font-medium">Medication Name *</label><input className="input" value={prescriptionForm.medication_name} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, medication_name: e.target.value })} required placeholder="e.g., Metformin" /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Dosage *</label><input className="input" value={prescriptionForm.dosage} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, dosage: e.target.value })} required placeholder="e.g., 500mg" /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Frequency *</label><input className="input" value={prescriptionForm.frequency} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, frequency: e.target.value })} required placeholder="e.g., Twice daily" /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("medicationName")} *</label><input className="input" value={prescriptionForm.medication_name} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, medication_name: e.target.value })} required placeholder={tr("medicationNamePlaceholder")} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("dosage")} *</label><input className="input" value={prescriptionForm.dosage} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, dosage: e.target.value })} required placeholder={tr("dosagePlaceholder")} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("frequency")} *</label><input className="input" value={prescriptionForm.frequency} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, frequency: e.target.value })} required placeholder={tr("frequencyPlaceholder")} /></div>
                         </div>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div><label className="mb-1 block text-xs font-medium">Duration (days)</label><input className="input" type="number" min="1" value={prescriptionForm.duration_days} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, duration_days: e.target.value })} /></div>
-                            <div><label className="mb-1 block text-xs font-medium">Instructions</label><input className="input" value={prescriptionForm.instructions} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, instructions: e.target.value })} placeholder="e.g., Take with meals" /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("durationDays")}</label><input className="input" type="number" min="1" value={prescriptionForm.duration_days} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, duration_days: e.target.value })} /></div>
+                            <div><label className="mb-1 block text-xs font-medium">{tr("instructions")}</label><input className="input" value={prescriptionForm.instructions} onChange={(e) => setPrescriptionForm({ ...prescriptionForm, instructions: e.target.value })} placeholder={tr("instructionsPlaceholder")} /></div>
                         </div>
                         {formError && <p className="text-xs text-danger">{formError}</p>}
-                        <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowPrescription(false)}>Cancel</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? "Adding..." : "Add"}</button></div>
+                        <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowPrescription(false)}>{tr("cancel")}</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? tr("adding") : tr("add")}</button></div>
                     </form>
                 )}
-                {prescriptions.length === 0 ? <p className="text-sm text-muted">No prescriptions recorded</p> : (
+                {prescriptions.length === 0 ? <p className="text-sm text-muted">{tr("noPrescriptionsRecorded")}</p> : (
                     <div className="space-y-2">{prescriptions.map((p) => (
                         <div key={p.prescription_id} className="rounded-md border border-border px-3 py-2 text-sm">
                             <div className="flex items-center gap-2">

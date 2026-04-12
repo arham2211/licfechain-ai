@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
+import { useLanguage } from "@/components/providers/LanguageProvider";
 
 type Patient = {
     patient_id: string;
@@ -36,6 +37,7 @@ type FamilyRelationship = {
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
 export default function PatientDetailPage() {
+    const { tr, language } = useLanguage();
     const params = useParams();
     const router = useRouter();
     const patientId = params.id as string;
@@ -67,14 +69,14 @@ export default function PatientDetailPage() {
     useEffect(() => {
         loadPatient();
         loadRelationships();
-    }, [patientId]);
+    }, [patientId, language]);
 
     async function loadPatient() {
         try {
             const data = await api.request<Patient>(`/patients/${patientId}`);
             setPatient(data);
         } catch (e) {
-            setError(e instanceof Error ? e.message : "Failed to load patient");
+            setError(e instanceof Error ? e.message : tr("failedToLoadPatient"));
         }
     }
 
@@ -116,24 +118,24 @@ export default function PatientDetailPage() {
                 body: JSON.stringify(editForm),
             });
             setEditing(false);
-            setSuccessMsg("Patient updated successfully");
+            setSuccessMsg(tr("patientUpdatedSuccessfully"));
             setTimeout(() => setSuccessMsg(null), 3000);
             await loadPatient();
         } catch (e) {
-            setEditError(e instanceof Error ? e.message : "Failed to update patient");
+            setEditError(e instanceof Error ? e.message : tr("failedToUpdatePatient"));
         } finally {
             setSaving(false);
         }
     }
 
     async function handleDelete() {
-        if (!confirm("Are you sure you want to delete this patient? This action cannot be undone.")) return;
+        if (!confirm(tr("confirmDeletePatient"))) return;
         setDeleting(true);
         try {
             await api.request(`/patients/${patientId}`, { method: "DELETE" });
             router.push("/patients");
         } catch (e) {
-            setError(e instanceof Error ? e.message : "Failed to delete patient");
+            setError(e instanceof Error ? e.message : tr("failedToDeletePatient"));
         } finally {
             setDeleting(false);
         }
@@ -154,10 +156,10 @@ export default function PatientDetailPage() {
             });
             setShowAddFamily(false);
             setFamilyForm({ relative_patient_id: "", relationship_type: "parent", is_blood_relative: true });
-            setSuccessMsg("Family relationship added successfully");
+            setSuccessMsg(tr("familyRelationshipAddedSuccessfully"));
             setTimeout(() => setSuccessMsg(null), 3000);
         } catch (e) {
-            setFamilyError(e instanceof Error ? e.message : "Failed to add family relationship");
+            setFamilyError(e instanceof Error ? e.message : tr("failedToAddFamilyRelationship"));
         } finally {
             setAddingFamily(false);
         }
@@ -166,10 +168,10 @@ export default function PatientDetailPage() {
     if (error) {
         return (
             <div className="space-y-4">
-                <PageHeader title="Patient Not Found" />
+                <PageHeader title={tr("patientNotFound")} />
                 <div className="card p-4 text-sm text-danger">{error}</div>
                 <button className="btn-primary" onClick={() => router.push("/patients")}>
-                    Back to Patients
+                    {tr("backToPatients")}
                 </button>
             </div>
         );
@@ -178,8 +180,8 @@ export default function PatientDetailPage() {
     if (!patient) {
         return (
             <div className="space-y-4">
-                <PageHeader title="Loading..." />
-                <div className="card p-4 text-sm text-muted">Loading patient details...</div>
+                <PageHeader title={tr("loading")} />
+                <div className="card p-4 text-sm text-muted">{tr("loadingPatientDetails")}</div>
             </div>
         );
     }
@@ -188,18 +190,18 @@ export default function PatientDetailPage() {
         <div className="space-y-4">
             <PageHeader
                 title={`${patient.first_name} ${patient.last_name}`}
-                subtitle={`Patient ID: ${patient.patient_id}`}
+                subtitle={`${tr("patientId")}: ${patient.patient_id}`}
                 right={
                     <div className="flex items-center gap-2">
                         <button
                             className="rounded-md border border-border px-3 py-2 text-sm"
                             onClick={() => router.push("/patients")}
                         >
-                            ← Back
+                            ← {tr("back")}
                         </button>
                         {canEdit && !editing && (
                             <button className="btn-primary text-sm" onClick={startEdit}>
-                                Edit Patient
+                                {tr("editPatient")}
                             </button>
                         )}
                         {canDelete && (
@@ -208,7 +210,7 @@ export default function PatientDetailPage() {
                                 onClick={handleDelete}
                                 disabled={deleting}
                             >
-                                {deleting ? "Deleting..." : "Delete"}
+                                {deleting ? tr("deleting") : tr("delete")}
                             </button>
                         )}
                     </div>
@@ -222,11 +224,11 @@ export default function PatientDetailPage() {
             {/* Edit Mode */}
             {editing ? (
                 <div className="card p-6">
-                    <h2 className="mb-4 text-lg font-semibold">Edit Patient Information</h2>
+                    <h2 className="mb-4 text-lg font-semibold">{tr("editPatientInformation")}</h2>
                     <form className="space-y-4" onSubmit={handleSave}>
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
-                                <label className="mb-1 block text-sm font-medium">First Name</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("firstName")}</label>
                                 <input
                                     className="input"
                                     value={editForm.first_name ?? ""}
@@ -235,7 +237,7 @@ export default function PatientDetailPage() {
                                 />
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Last Name</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("lastName")}</label>
                                 <input
                                     className="input"
                                     value={editForm.last_name ?? ""}
@@ -246,7 +248,7 @@ export default function PatientDetailPage() {
                         </div>
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
-                                <label className="mb-1 block text-sm font-medium">CNIC</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("cnic")}</label>
                                 <input
                                     className="input"
                                     value={editForm.cnic ?? ""}
@@ -255,7 +257,7 @@ export default function PatientDetailPage() {
                                 />
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Date of Birth</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("dateOfBirth")}</label>
                                 <input
                                     className="input"
                                     type="date"
@@ -266,19 +268,19 @@ export default function PatientDetailPage() {
                         </div>
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Gender</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("gender")}</label>
                                 <select
                                     className="input"
                                     value={editForm.gender ?? "male"}
                                     onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}
                                 >
-                                    <option value="male">Male</option>
-                                    <option value="female">Female</option>
-                                    <option value="other">Other</option>
+                                    <option value="male">{tr("male")}</option>
+                                    <option value="female">{tr("female")}</option>
+                                    <option value="other">{tr("other")}</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Blood Group</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("bloodGroup")}</label>
                                 <select
                                     className="input"
                                     value={editForm.blood_group ?? "O+"}
@@ -290,7 +292,7 @@ export default function PatientDetailPage() {
                                 </select>
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Phone</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("phone")}</label>
                                 <input
                                     className="input"
                                     value={editForm.phone ?? ""}
@@ -300,7 +302,7 @@ export default function PatientDetailPage() {
                         </div>
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Email</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("email")}</label>
                                 <input
                                     className="input"
                                     type="email"
@@ -309,7 +311,7 @@ export default function PatientDetailPage() {
                                 />
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Address</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("address")}</label>
                                 <input
                                     className="input"
                                     value={editForm.address ?? ""}
@@ -324,10 +326,10 @@ export default function PatientDetailPage() {
                                 className="rounded-md border border-border px-4 py-2 text-sm"
                                 onClick={() => setEditing(false)}
                             >
-                                Cancel
+                                {tr("cancel")}
                             </button>
                             <button className="btn-primary" type="submit" disabled={saving}>
-                                {saving ? "Saving..." : "Save Changes"}
+                                {saving ? tr("saving") : tr("saveChanges")}
                             </button>
                         </div>
                     </form>
@@ -336,94 +338,58 @@ export default function PatientDetailPage() {
                 /* Read-only View */
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                     <div className="card p-6">
-                        <h2 className="mb-4 text-lg font-semibold">Personal Information</h2>
+                        <h2 className="mb-4 text-lg font-semibold">{tr("personalInformation")}</h2>
                         <div className="space-y-3 text-sm">
-                            <InfoRow label="Full Name" value={`${patient.first_name} ${patient.last_name}`} />
-                            <InfoRow label="CNIC" value={patient.cnic} />
-                            <InfoRow label="Date of Birth" value={String(patient.date_of_birth).slice(0, 10)} />
-                            <InfoRow label="Gender" value={patient.gender} />
-                            <InfoRow label="Blood Group" value={patient.blood_group ?? "-"} />
-                            <InfoRow label="Phone" value={patient.phone ?? "-"} />
-                            <InfoRow label="Email" value={patient.email ?? "-"} />
-                            <InfoRow label="Address" value={patient.address ?? "-"} />
+                            <InfoRow label={tr("fullName")} value={`${patient.first_name} ${patient.last_name}`} />
+                            <InfoRow label={tr("cnic")} value={patient.cnic} />
+                            <InfoRow label={tr("dateOfBirth")} value={String(patient.date_of_birth).slice(0, 10)} />
+                            <InfoRow label={tr("gender")} value={patient.gender} />
+                            <InfoRow label={tr("bloodGroup")} value={patient.blood_group ?? "-"} />
+                            <InfoRow label={tr("phone")} value={patient.phone ?? "-"} />
+                            <InfoRow label={tr("email")} value={patient.email ?? "-"} />
+                            <InfoRow label={tr("address")} value={patient.address ?? "-"} />
                         </div>
                     </div>
 
                     <div className="card p-6">
-                        <h2 className="mb-4 text-lg font-semibold">System Information</h2>
+                        <h2 className="mb-4 text-lg font-semibold">{tr("systemInformation")}</h2>
                         <div className="space-y-3 text-sm">
-                            <InfoRow label="Patient ID" value={patient.patient_id} />
+                            <InfoRow label={tr("patientId")} value={patient.patient_id} />
                             <InfoRow
-                                label="Role"
+                                label={tr("role")}
                                 value={
                                     patient.is_doctor ? (
                                         <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
-                                            Doctor
+                                            {tr("doctor")}
                                         </span>
                                     ) : (
                                         <span className="rounded-full bg-success/20 px-2 py-0.5 text-xs text-success">
-                                            Patient
+                                            {tr("patient")}
                                         </span>
                                     )
                                 }
                             />
                             {patient.is_doctor && (
                                 <>
-                                    <InfoRow label="Specialization" value={patient.specialization ?? "-"} />
-                                    <InfoRow label="License #" value={patient.license_number ?? "-"} />
-                                    <InfoRow label="Hospital" value={patient.hospital_affiliation ?? "-"} />
+                                    <InfoRow label={tr("specialization")} value={patient.specialization ?? "-"} />
+                                    <InfoRow label={tr("license")} value={patient.license_number ?? "-"} />
+                                    <InfoRow label={tr("hospital")} value={patient.hospital_affiliation ?? "-"} />
                                 </>
                             )}
-                            <InfoRow label="Created" value={new Date(patient.created_at).toLocaleString()} />
-                            <InfoRow label="Last Updated" value={new Date(patient.updated_at).toLocaleString()} />
+                            <InfoRow label={tr("created")} value={new Date(patient.created_at).toLocaleString()} />
+                            <InfoRow label={tr("lastUpdated")} value={new Date(patient.updated_at).toLocaleString()} />
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Quick Actions */}
-            {!editing && (
-                <div className="card p-4">
-                    <h2 className="mb-3 text-lg font-semibold">Quick Actions</h2>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                        {canEdit && (
-                            <button
-                                className="btn-primary text-sm"
-                                onClick={() => setShowAddFamily(true)}
-                            >
-                                + Add Family Relationship
-                            </button>
-                        )}
-                        {userRoles.some((r) => ["admin", "doctor"].includes(r)) && (
-                            <button
-                                className="btn-primary text-sm"
-                                onClick={() => router.push(`/visits?patient_id=${patientId}`)}
-                            >
-                                View Visits
-                            </button>
-                        )}
-                        <button
-                            className="btn-primary text-sm"
-                            onClick={() => router.push(`/reports?patient_id=${patientId}`)}
-                        >
-                            View Reports
-                        </button>
-                        <button
-                            className="btn-primary text-sm"
-                            onClick={() => router.push(`/ml?patient_id=${patientId}`)}
-                        >
-                            Run ML Diagnosis
-                        </button>
-                    </div>
-                </div>
-            )}
 
             {/* Add Family Relationship Modal */}
             {showAddFamily && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
                     <div className="card w-full max-w-md p-6">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-semibold">Add Family Relationship</h2>
+                            <h2 className="text-lg font-semibold">{tr("addFamilyRelationship")}</h2>
                             <button
                                 className="rounded-md border border-border px-3 py-1 text-sm"
                                 onClick={() => setShowAddFamily(false)}
@@ -433,31 +399,31 @@ export default function PatientDetailPage() {
                         </div>
                         <form className="mt-4 space-y-4" onSubmit={handleAddFamily}>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Relative Patient ID *</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("relativePatientId")} *</label>
                                 <input
                                     className="input"
                                     value={familyForm.relative_patient_id}
                                     onChange={(e) => setFamilyForm({ ...familyForm, relative_patient_id: e.target.value })}
                                     required
-                                    placeholder="UUID of relative"
+                                    placeholder={tr("relativePatientIdPlaceholder")}
                                 />
                             </div>
                             <div>
-                                <label className="mb-1 block text-sm font-medium">Relationship Type *</label>
+                                <label className="mb-1 block text-sm font-medium">{tr("relationshipType")} *</label>
                                 <select
                                     className="input"
                                     value={familyForm.relationship_type}
                                     onChange={(e) => setFamilyForm({ ...familyForm, relationship_type: e.target.value })}
                                 >
-                                    <option value="parent">Parent</option>
-                                    <option value="child">Child</option>
-                                    <option value="sibling">Sibling</option>
-                                    <option value="spouse">Spouse</option>
-                                    <option value="grandparent">Grandparent</option>
-                                    <option value="grandchild">Grandchild</option>
-                                    <option value="aunt_uncle">Aunt/Uncle</option>
-                                    <option value="niece_nephew">Niece/Nephew</option>
-                                    <option value="cousin">Cousin</option>
+                                    <option value="parent">{tr("parent")}</option>
+                                    <option value="child">{tr("child")}</option>
+                                    <option value="sibling">{tr("sibling")}</option>
+                                    <option value="spouse">{tr("spouse")}</option>
+                                    <option value="grandparent">{tr("grandparent")}</option>
+                                    <option value="grandchild">{tr("grandchild")}</option>
+                                    <option value="aunt_uncle">{tr("auntUncle")}</option>
+                                    <option value="niece_nephew">{tr("nieceNephew")}</option>
+                                    <option value="cousin">{tr("cousin")}</option>
                                 </select>
                             </div>
                             <div className="flex items-center gap-2">
@@ -467,7 +433,7 @@ export default function PatientDetailPage() {
                                     checked={familyForm.is_blood_relative}
                                     onChange={(e) => setFamilyForm({ ...familyForm, is_blood_relative: e.target.checked })}
                                 />
-                                <label htmlFor="blood_relative" className="text-sm">Blood relative</label>
+                                <label htmlFor="blood_relative" className="text-sm">{tr("bloodRelative")}</label>
                             </div>
                             {familyError ? <p className="text-sm text-danger">{familyError}</p> : null}
                             <div className="flex justify-end gap-2">
@@ -476,10 +442,10 @@ export default function PatientDetailPage() {
                                     className="rounded-md border border-border px-4 py-2 text-sm"
                                     onClick={() => setShowAddFamily(false)}
                                 >
-                                    Cancel
+                                    {tr("cancel")}
                                 </button>
                                 <button className="btn-primary" type="submit" disabled={addingFamily}>
-                                    {addingFamily ? "Adding..." : "Add Relationship"}
+                                    {addingFamily ? tr("adding") : tr("addRelationship")}
                                 </button>
                             </div>
                         </form>

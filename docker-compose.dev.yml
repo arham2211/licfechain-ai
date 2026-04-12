@@ -1,0 +1,44 @@
+services:
+  backend:
+    image: lifechain-ai:local
+    container_name: lifechain-backend-dev
+    working_dir: /app
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:arham@host.docker.internal:5433/lifechain-ai
+      DIRECT_DATABASE_URL: postgresql+psycopg2://postgres:arham@host.docker.internal:5433/lifechain-ai
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./model_training:/app/model_training
+      - ./models:/app/models
+      - ./alembic.ini:/app/alembic.ini
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    image: node:24-alpine
+    container_name: lifechain-frontend-dev
+    working_dir: /app/frontend
+    command: sh -c "npm install && npm run dev -- --webpack -H 0.0.0.0 -p 3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+      - frontend_next_cache:/app/frontend/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  frontend_node_modules:
+  frontend_next_cache:

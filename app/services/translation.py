@@ -4,6 +4,8 @@ Uses LangChain Groq to translate medical terminology for doctors who don't speak
 """
 
 import json
+import re
+import time
 from typing import Dict, Any, Optional, List
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,6 +15,10 @@ from app.core.config import get_settings
 # Initialize LLM and parser (singleton pattern)
 _llm: Optional[ChatGroq] = None
 _parser: Optional[JsonOutputParser] = None
+PROTECTED_TOKENS_PATTERN = re.compile(r"\b(?:CKD|HbA1c|eGFR|BUN|GFR|A1C)\b")
+_translation_cache: Dict[str, tuple[float, str]] = {}
+_CACHE_TTL_SECONDS = 60 * 60 * 24
+_CACHE_MAX_ENTRIES = 10000
 
 def get_translation_llm() -> ChatGroq:
     """Get or create the Groq LLM instance"""
@@ -20,7 +26,7 @@ def get_translation_llm() -> ChatGroq:
     if _llm is None:
         settings = get_settings()
         _llm = ChatGroq(
-            model="groq/compound",  # Using versatile model for better translation
+            model="llama-3.1-8b-instant",  # Stable/fast model for short translation tasks
             temperature=0,
             groq_api_key=settings.GROQ_API_KEY
         )
@@ -32,6 +38,50 @@ def get_translation_parser() -> JsonOutputParser:
     if _parser is None:
         _parser = JsonOutputParser()
     return _parser
+
+
+def _protect_medical_tokens(text: str) -> tuple[str, Dict[str, str]]:
+    placeholders: Dict[str, str] = {}
+    protected = text
+    tokens = list(dict.fromkeys(PROTECTED_TOKENS_PATTERN.findall(text)))
+    for idx, token in enumerate(tokens):
+        marker = f"__MEDTERM_{idx}__"
+        placeholders[marker] = token
+        protected = protected.replace(token, marker)
+    return protected, placeholders
+
+
+def _restore_medical_tokens(text: str, placeholders: Dict[str, str]) -> str:
+    restored = text
+    for marker, token in placeholders.items():
+        restored = restored.replace(marker, token)
+    return restored
+
+
+def _cache_key(lang: str, text: str) -> str:
+    return f"{lang}::{text}"
+
+
+def _cache_get(lang: str, text: str) -> Optional[str]:
+    key = _cache_key(lang, text)
+    row = _translation_cache.get(key)
+    if not row:
+        return None
+    ts, value = row
+    if time.time() - ts > _CACHE_TTL_SECONDS:
+        _translation_cache.pop(key, None)
+        return None
+    return value
+
+
+def _cache_set(lang: str, text: str, value: str) -> None:
+    if len(_translation_cache) >= _CACHE_MAX_ENTRIES:
+        # prune oldest ~10%
+        items = sorted(_translation_cache.items(), key=lambda kv: kv[1][0])
+        prune_count = max(1, _CACHE_MAX_ENTRIES // 10)
+        for k, _ in items[:prune_count]:
+            _translation_cache.pop(k, None)
+    _translation_cache[_cache_key(lang, text)] = (time.time(), value)
 
 # Translation schema for medical terms
 TRANSLATION_SCHEMA = {
@@ -71,19 +121,25 @@ async def translate_text(
     """
     if not text or not text.strip():
         return text
+    if target_language == "en":
+        return text
+    cached = _cache_get(target_language, text)
+    if cached is not None:
+        return cached
+    protected_text, placeholders = _protect_medical_tokens(text)
     
     try:
         llm = get_translation_llm()
         parser = get_translation_parser()
-        
+
         language_names = {
             "ur": "Urdu",
-            "ar": "Arabic",
-            "hi": "Hindi",
-            "bn": "Bengali"
+            "fr": "French",
+            "de": "German",
         }
         language_name = language_names.get(target_language, target_language)
-        
+
+        # First attempt: structured JSON response (strict + deterministic)
         prompt = ChatPromptTemplate.from_messages([
             ("system", """
 You are a Medical Translation Expert. Translate the English medical text to {language_name}.
@@ -106,27 +162,67 @@ Rules:
             """),
             ("human", "Translate this medical text to {language_name}:\n\n{text}\n\nReturn ONLY the JSON object with no additional text.")
         ])
-        
+
         chain = prompt | llm | parser
-        
         result = await chain.ainvoke({
-            "text": text,
+            "text": protected_text,
             "language_name": language_name,
             "target_language": target_language,
             "context": context
         })
-        
-        # Extract translated text from result
+
         if isinstance(result, dict):
             translated = result.get("translated_text", text)
-        else:
-            # Fallback: try to extract JSON from string if parser failed
-            translated = _extract_json_from_text(str(result), text)
-        
-        return translated
-    
+            if translated and translated.strip():
+                restored = _restore_medical_tokens(translated, placeholders)
+                _cache_set(target_language, text, restored)
+                return restored
+
+        translated = _extract_json_from_text(str(result), protected_text)
+        if translated and translated.strip() and translated != text:
+            restored = _restore_medical_tokens(translated, placeholders)
+            _cache_set(target_language, text, restored)
+            return restored
+
     except Exception as e:
-        # If translation fails, return original text
+        print(f"Structured translation attempt failed: {str(e)}")
+
+    # Second attempt: plain text translation (robust fallback for long paragraphs)
+    try:
+        llm = get_translation_llm()
+        language_names = {
+            "ur": "Urdu",
+            "fr": "French",
+            "de": "German",
+        }
+        language_name = language_names.get(target_language, target_language)
+
+        fallback_prompt = ChatPromptTemplate.from_messages([
+            ("system", """
+You are a medical translator.
+Translate the user's medical text to {language_name}.
+Return ONLY translated text and preserve numbers, units, and medication names.
+Do not explain.
+            """),
+            ("human", "{text}")
+        ])
+
+        fallback_chain = fallback_prompt | llm
+        raw = await fallback_chain.ainvoke({
+            "text": protected_text,
+            "language_name": language_name,
+            "target_language": target_language,
+            "context": context
+        })
+
+        translated_text = getattr(raw, "content", str(raw)).strip().strip('"').strip("'")
+        if translated_text:
+            restored = _restore_medical_tokens(translated_text, placeholders)
+            _cache_set(target_language, text, restored)
+            return restored
+        return text
+
+    except Exception as e:
         print(f"Translation error: {str(e)}")
         import traceback
         traceback.print_exc()
@@ -181,9 +277,6 @@ def _extract_json_from_text(text: str, fallback: str) -> str:
     Try to extract JSON from text that may contain explanations.
     Falls back to original text if JSON cannot be extracted.
     """
-    import re
-    import json
-    
     # Try to find JSON object in the text
     json_pattern = r'\{[^{}]*"translated_text"[^{}]*\}'
     matches = re.findall(json_pattern, text, re.DOTALL)
@@ -205,6 +298,151 @@ def _extract_json_from_text(text: str, fallback: str) -> str:
     
     # If no JSON found, return fallback
     return fallback
+
+
+def _extract_batch_json(text: str) -> Dict[str, str]:
+    """
+    Extract batch translation JSON from model output.
+    Expected shape:
+    {
+      "translations": [
+        {"original_text": "...", "translated_text": "..."},
+        ...
+      ]
+    }
+    """
+    if not text:
+        return {}
+
+    # First, try direct JSON parse
+    try:
+        parsed = json.loads(text)
+        translations = parsed.get("translations", [])
+        out: Dict[str, str] = {}
+        for item in translations:
+            if isinstance(item, dict):
+                original = str(item.get("original_text", "")).strip()
+                translated = str(item.get("translated_text", "")).strip()
+                if original:
+                    out[original] = translated or original
+        if out:
+            return out
+    except Exception:
+        pass
+
+    # Fallback: extract first JSON object from free-form text
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(match.group(0))
+        translations = parsed.get("translations", [])
+        out: Dict[str, str] = {}
+        for item in translations:
+            if isinstance(item, dict):
+                original = str(item.get("original_text", "")).strip()
+                translated = str(item.get("translated_text", "")).strip()
+                if original:
+                    out[original] = translated or original
+        return out
+    except Exception:
+        return {}
+
+
+async def translate_texts_batch(
+    texts: List[str],
+    target_language: str = "ur",
+    context: str = "medical",
+) -> Dict[str, str]:
+    """
+    Translate a batch of strings in ONE LLM request to avoid rate-limit spikes.
+    Returns mapping {original_text: translated_text}.
+    """
+    cleaned = [t.strip() for t in texts if isinstance(t, str) and t.strip()]
+    unique = list(dict.fromkeys(cleaned))
+
+    if not unique or target_language == "en":
+        return {t: t for t in unique}
+
+    language_names = {
+        "ur": "Urdu",
+        "fr": "French",
+        "de": "German",
+    }
+    language_name = language_names.get(target_language, target_language)
+
+    translations: Dict[str, str] = {t: t for t in unique}
+    unresolved: List[str] = []
+    for original in unique:
+        cached = _cache_get(target_language, original)
+        if cached is not None:
+            translations[original] = cached
+        else:
+            unresolved.append(original)
+    if not unresolved:
+        return translations
+
+    protected_map: Dict[str, str] = {}
+    placeholder_map: Dict[str, Dict[str, str]] = {}
+    for original in unresolved:
+        protected, placeholders = _protect_medical_tokens(original)
+        protected_map[original] = protected
+        placeholder_map[original] = placeholders
+    chunk_size = 8
+
+    try:
+        llm = get_translation_llm()
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "Translate medical strings to {language_name}. "
+                "Return ONLY JSON in shape: "
+                '{{"translations":[{{"original_text":"...","translated_text":"..."}}]}}',
+            ),
+            ("human", "{texts_json}"),
+        ])
+        chain = prompt | llm
+
+        for i in range(0, len(unresolved), chunk_size):
+            chunk = unresolved[i:i + chunk_size]
+            protected_chunk = [protected_map[t] for t in chunk]
+            try:
+                raw = await chain.ainvoke({
+                    "language_name": language_name,
+                    "target_language": target_language,
+                    "context": context,
+                    "texts_json": json.dumps(protected_chunk, ensure_ascii=False),
+                })
+                content = getattr(raw, "content", str(raw))
+                parsed = _extract_batch_json(content)
+                if parsed:
+                    for t in chunk:
+                        protected_original = protected_map[t]
+                        translated = parsed.get(protected_original, protected_original) or protected_original
+                        restored = _restore_medical_tokens(translated, placeholder_map[t])
+                        if restored.strip() == t.strip() and len(t.split()) > 2:
+                            # If batch left a long string unchanged, retry with focused single translation.
+                            try:
+                                restored = await translate_text(t, target_language, context)
+                            except Exception:
+                                restored = t
+                        translations[t] = restored
+                        _cache_set(target_language, t, restored)
+            except Exception as e:
+                print(f"Batch chunk translation error: {str(e)}")
+                # Fallback this chunk to single-string translation
+                for t in chunk:
+                    try:
+                        translations[t] = await translate_text(t, target_language, context)
+                    except Exception:
+                        translations[t] = t
+
+        return translations
+    except Exception as e:
+        print(f"Batch translation error: {str(e)}")
+
+    # Last-resort fallback: return original text to keep UI stable
+    return translations
 
 def _model_to_dict(model_instance: Any) -> Optional[Dict[str, Any]]:
     """
@@ -385,4 +623,3 @@ async def translate_dict_async(
                 )
     
     return translated_data
-

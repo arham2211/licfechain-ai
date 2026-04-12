@@ -219,6 +219,7 @@ async def get_lab_measurements_timeline(
     patient_id: UUID,
     test_name: Optional[str] = Query(None, description="Filter by specific test name (e.g., 'hba1c', 'glucose'). If not provided, returns all tests"),
     months_back: int = Query(12, ge=1, le=60, description="Number of months to look back"),
+    lang: str = Depends(get_translation_language),
     db: AsyncSession = Depends(get_db)
 ):
     """Get numerical lab test measurements over time for graphing with spikes and measurement lines"""
@@ -242,6 +243,13 @@ async def get_lab_measurements_timeline(
         if "error" in timeline_data:
             raise HTTPException(status_code=500, detail=timeline_data.get("error", "Failed to get lab measurements"))
         
+        if lang != "en" and isinstance(timeline_data, dict) and isinstance(timeline_data.get("measurements"), dict):
+            translated_measurements = {}
+            for raw_test_name, details in timeline_data["measurements"].items():
+                translated_name = await translate_text(str(raw_test_name), lang, "medical")
+                translated_measurements[translated_name] = details
+            timeline_data["measurements"] = translated_measurements
+
         return timeline_data
     
     except HTTPException:

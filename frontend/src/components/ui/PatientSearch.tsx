@@ -76,7 +76,7 @@ export function PatientSearch({ onSelect, placeholder = "Search patient by name 
             </div>
 
             {showResults && results.length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-[100] mt-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-card-solid p-1 shadow-2xl animate-in fade-in slide-in-from-top-2">
+                <div className="absolute left-0 right-0 top-full z-[9999] mt-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-card-solid p-1 shadow-2xl animate-in fade-in slide-in-from-top-2">
                     {results.map((p) => (
                         <button
                             key={p.patient_id}
@@ -102,7 +102,7 @@ export function PatientSearch({ onSelect, placeholder = "Search patient by name 
             )}
 
             {showResults && query.length >= 2 && !loading && results.length === 0 && (
-                <div className="absolute left-0 right-0 top-full z-[100] mt-2 rounded-xl border border-border bg-card-solid p-4 text-center shadow-2xl animate-in fade-in">
+                <div className="absolute left-0 right-0 top-full z-[9999] mt-2 rounded-xl border border-border bg-card-solid p-4 text-center shadow-2xl animate-in fade-in">
                     <p className="text-sm text-slate-400 italic">No patients found matches "{query}"</p>
                 </div>
             )}

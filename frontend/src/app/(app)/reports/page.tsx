@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { BarChart3, CheckCircle, Loader2, TrendingUp } from "lucide-react";
@@ -9,6 +9,7 @@ import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
 import { useLanguage } from "@/components/providers/LanguageProvider";
 import { PatientSearch } from "@/components/ui/PatientSearch";
+import { translateDynamicTexts } from "@/lib/dynamic-translation";
 
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart,
@@ -31,20 +32,27 @@ type LabMeasurement = { date: string; name: string; value: number; unit: string;
 type LabTimeline = { [key: string]: LabMeasurement[] };
 
 export default function ReportsPage() {
-  const { tr } = useLanguage();
+  const { tr, language } = useLanguage();
   const searchParams = useSearchParams();
   const patientIdParam = searchParams.get("patientId");
   const diseaseParam = searchParams.get("disease");
+  const user = getUser();
+  const initialIsPatient = user?.roles.includes("patient") ?? false;
+  const initialPatientId = initialIsPatient ? (user?.patient_id || "") : "";
 
-  const [isPatient, setIsPatient] = useState<boolean>(false);
-  const [patientId, setPatientId] = useState<string>(patientIdParam || "");
+  const [isPatient, setIsPatient] = useState<boolean>(initialIsPatient);
+  const [patientId, setPatientId] = useState<string>(patientIdParam || initialPatientId);
   const [disease, setDisease] = useState<string>(diseaseParam || "diabetes");
+  const [authReady, setAuthReady] = useState(false);
+  const loadRequestId = useRef(0);
 
   const [localViewMode, setLocalViewMode] = useState<"clinical" | "personal">("clinical");
 
   useEffect(() => {
-    const user = getUser();
-    if (!user) return;
+    if (!user) {
+      setAuthReady(true);
+      return;
+    }
     const isDoctor = user.roles.includes("doctor");
     if (user.roles.includes("patient")) {
       setIsPatient(true);
@@ -55,7 +63,8 @@ export default function ReportsPage() {
     } else {
       setIsPatient(false);
     }
-  }, [localViewMode]);
+    setAuthReady(true);
+  }, [localViewMode, user]);
 
 
 
@@ -68,17 +77,20 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  /* Auto-load for patient role */
+  /* Auto-load whenever patient context + language/condition changes */
   useEffect(() => {
-    if (isPatient && patientId) {
+    if (!authReady) return;
+    if (patientId) {
       loadAnalytics();
     }
-  }, [disease, isPatient, patientId]);
+  }, [authReady, disease, patientId, language]);
 
 
   async function loadAnalytics(e?: FormEvent) {
+    const requestId = ++loadRequestId.current;
     if (e) e.preventDefault();
-    setError(null); setTimeline([]); setRisk(null); setRecommendations(null); setFuturePrediction(null); setLabTimeline(null);
+    setError(null);
+    if (isPatient && !patientId) return;
     if (!patientId) { setError(tr("patientIdRequired")); return; }
     setLoading(true);
     try {
@@ -89,15 +101,66 @@ export default function ReportsPage() {
         api.request<FuturePrediction>(`/reports/patient/${encodeURIComponent(patientId)}/predict-progression?months_ahead=6`, { method: "POST" }),
         api.request<LabTimeline>(`/reports/patient/${encodeURIComponent(patientId)}/lab-measurements-timeline?months_back=12`),
       ]);
-      setTimeline(timelineData); setRisk(riskData); setRecommendations(recData); setFuturePrediction(predictData); setLabTimeline(labData);
+      if (requestId !== loadRequestId.current) return;
+      const textsToTranslate = [
+        ...timelineData.map((t) => t.progression_stage),
+        ...timelineData.map((t) => t.doctor_notes ?? "").filter(Boolean),
+        ...(riskData?.message ? [riskData.message] : []),
+        ...(recData?.summary ? [recData.summary] : []),
+        ...(recData?.recommendations ?? recData?.next_steps ?? []),
+        ...(predictData?.overall_trajectory?.status ? [predictData.overall_trajectory.status] : []),
+        ...(predictData?.overall_trajectory?.message ? [predictData.overall_trajectory.message] : []),
+      ];
+      const translated = await translateDynamicTexts(textsToTranslate, language);
+      const trText = (value?: string | null) => (value ? (translated[value] ?? value) : value);
+
+      setTimeline(
+        timelineData.map((item) => ({
+          ...item,
+          progression_stage: trText(item.progression_stage) ?? item.progression_stage,
+          doctor_notes: trText(item.doctor_notes) ?? item.doctor_notes,
+        }))
+      );
+      setRisk(riskData ? { ...riskData, message: trText(riskData.message) ?? riskData.message } : null);
+      setRecommendations(
+        recData
+          ? {
+              ...recData,
+              summary: trText(recData.summary) ?? recData.summary,
+              recommendations: recData.recommendations?.map((r) => trText(r) ?? r),
+              next_steps: recData.next_steps?.map((r) => trText(r) ?? r),
+            }
+          : null
+      );
+      setFuturePrediction(
+        predictData?.overall_trajectory
+          ? {
+              ...predictData,
+              overall_trajectory: {
+                ...predictData.overall_trajectory,
+                status: trText(predictData.overall_trajectory.status) ?? predictData.overall_trajectory.status,
+                message: trText(predictData.overall_trajectory.message) ?? predictData.overall_trajectory.message,
+              },
+            }
+          : predictData
+      );
+      setLabTimeline(labData);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load report");
+      if (requestId !== loadRequestId.current) return;
+      setError(e instanceof Error ? e.message : tr("failedToLoadReport"));
     } finally {
+      if (requestId !== loadRequestId.current) return;
       setLoading(false);
     }
   }
 
   const recsList = recommendations?.recommendations ?? recommendations?.next_steps ?? [];
+  const hasAnyRenderedData =
+    timeline.length > 0 ||
+    recsList.length > 0 ||
+    !!risk ||
+    !!futurePrediction ||
+    !!labTimeline;
 
   // 1. Merge Timeline and Prediction for Integrated Graph
   const severityMapping: Record<string, number> = {
@@ -129,16 +192,16 @@ export default function ReportsPage() {
       return (
         <div className="bg-white p-4 rounded-xl shadow-2xl border border-slate-100 min-w-[200px]">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
-            {data.isPredicted ? "AI Projection" : `Clinical Record: ${String(label).slice(0, 10)}`}
+            {data.isPredicted ? tr("aiProjection") : `${tr("clinicalRecord")}: ${String(label).slice(0, 10)}`}
           </p>
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-lg font-black text-slate-800 uppercase">{data.progression_stage?.replace(/_/g, " ")}</span>
-            <span className="text-xs px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">Sev: {data.severity_score}</span>
+            <span className="text-lg font-black text-slate-800 uppercase">{(data.progression_stage ?? "").replace(/_/g, " ")}</span>
+            <span className="text-xs px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">{tr("severityShort")}: {data.severity_score}</span>
           </div>
 
           {!data.isPredicted && data.medications && data.medications.length > 0 && (
             <div className="mt-3 pt-3 border-t border-slate-50">
-              <p className="text-[10px] font-bold text-primary uppercase mb-2">Medications at this stage:</p>
+              <p className="text-[10px] font-bold text-primary uppercase mb-2">{tr("medicationsAtThisStage")}:</p>
               <div className="space-y-1.5">
                 {data.medications.map((m: any, i: number) => (
                   <div key={i} className="flex justify-between items-center text-xs">
@@ -152,7 +215,7 @@ export default function ReportsPage() {
 
           {!data.isPredicted && data.doctor_notes && (
             <div className="mt-3 pt-3 border-t border-slate-50">
-              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Doctor Notes:</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">{tr("doctorNotes")}:</p>
               <p className="text-[11px] text-slate-500 italic line-clamp-2">{data.doctor_notes}</p>
             </div>
           )}
@@ -165,8 +228,8 @@ export default function ReportsPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-4">
       <PageHeader
-        title={isPatient ? "Integrated Health Trajectory" : `${tr("reports")} - ${tr("analytics")}`}
-        subtitle={isPatient ? "AI-powered view of your historical progression, medications, and future medical forecast." : "Progression graphs, risk analysis, and next-step recommendations."}
+        title={isPatient ? tr("integratedHealthTrajectory") : `${tr("reports")} - ${tr("analytics")}`}
+        subtitle={isPatient ? tr("integratedHealthTrajectorySubtitle") : tr("reportsAnalyticsSubtitle")}
         icon={<BarChart3 size={20} />}
       />
 
@@ -177,16 +240,16 @@ export default function ReportsPage() {
             {!isPatient ? (
               <div className="flex flex-col md:flex-row gap-3 items-end">
                 <div className="flex-1 w-full">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Select Patient</label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">{tr("selectPatient")}</label>
                   <PatientSearch onSelect={(id) => setPatientId(id)} />
                 </div>
                 <div className="w-full md:w-48">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Condition</label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">{tr("condition")}</label>
                   <select className="input" value={disease} onChange={(e) => setDisease(e.target.value)}>
-                    <option value="diabetes">Diabetes</option>
-                    <option value="anemia">Anemia</option>
-                    <option value="ckd">CKD</option>
-                    <option value="parathyroid">Parathyroid</option>
+                    <option value="diabetes">{tr("diabetes")}</option>
+                    <option value="anemia">{tr("anemia")}</option>
+                    <option value="ckd">{tr("ckd")}</option>
+                    <option value="parathyroid">{tr("parathyroid")}</option>
                   </select>
                 </div>
                 <button
@@ -194,7 +257,7 @@ export default function ReportsPage() {
                   className="btn-primary flex items-center justify-center gap-2 h-[42px] px-6"
                   disabled={loading || !patientId}
                 >
-                  {loading ? <><Loader2 size={16} className="animate-spin" /> Loading...</> : "Analyze Trajectory"}
+                  {loading ? <><Loader2 size={16} className="animate-spin" /> {tr("loading")}</> : tr("analyzeTrajectory")}
                 </button>
               </div>
             ) : (
@@ -204,15 +267,15 @@ export default function ReportsPage() {
                     <CheckCircle size={24} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-slate-800">Viewing My Personal Health</h3>
-                    <p className="text-sm text-slate-500">Displaying your own verified clinical data and AI forecasts.</p>
+                    <h3 className="text-lg font-bold text-slate-800">{tr("viewingMyPersonalHealth")}</h3>
+                    <p className="text-sm text-slate-500">{tr("viewingMyPersonalHealthSubtitle")}</p>
                   </div>
                 </div>
                 <select className="input w-48" value={disease} onChange={(e) => setDisease(e.target.value)}>
-                  <option value="diabetes">Diabetes</option>
-                  <option value="anemia">Anemia</option>
-                  <option value="ckd">CKD</option>
-                  <option value="parathyroid">Parathyroid</option>
+                  <option value="diabetes">{tr("diabetes")}</option>
+                  <option value="anemia">{tr("anemia")}</option>
+                  <option value="ckd">{tr("ckd")}</option>
+                  <option value="parathyroid">{tr("parathyroid")}</option>
                 </select>
               </div>
             )}
@@ -224,13 +287,13 @@ export default function ReportsPage() {
                 onClick={() => setLocalViewMode("clinical")}
                 className={`px-3 py-1.5 text-xs font-bold rounded-full transition ${localViewMode === "clinical" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
               >
-                Patients
+                {tr("patients")}
               </button>
               <button
                 onClick={() => setLocalViewMode("personal")}
                 className={`px-3 py-1.5 text-xs font-bold rounded-full transition ${localViewMode === "personal" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-emerald-500"}`}
               >
-                Personal
+                {tr("personal")}
               </button>
             </div>
           )}
@@ -240,11 +303,11 @@ export default function ReportsPage() {
 
       {error && <div className="alert-error">{error}</div>}
 
-      {loading && (
+      {loading && !hasAnyRenderedData && (
         <div className="flex items-center justify-center h-64">
           <div className="flex flex-col items-center gap-3">
             <Loader2 size={40} className="animate-spin text-primary opacity-50" />
-            <span className="text-sm font-medium text-slate-400">Analyzing clinical history & medications...</span>
+            <span className="text-sm font-medium text-slate-400">{tr("analyzingClinicalHistory")}</span>
           </div>
         </div>
       )}
@@ -254,12 +317,12 @@ export default function ReportsPage() {
         <div className="card p-6 md:p-8 animate-in shadow-xl border-primary/5 bg-gradient-to-b from-white to-slate-50/30">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
             <div>
-              <h3 className="text-xl font-bold text-slate-800">Health Progression, Medications & AI Forecast</h3>
-              <p className="text-sm text-slate-500">View how your treatments correlate with your disease progression over time.</p>
+              <h3 className="text-xl font-bold text-slate-800">{tr("healthProgressionAndForecast")}</h3>
+              <p className="text-sm text-slate-500">{tr("healthProgressionAndForecastSubtitle")}</p>
             </div>
             {futurePrediction?.overall_trajectory?.status && (
               <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-full border border-slate-100 shadow-sm">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Forecast Status:</span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{tr("forecastStatus")}:</span>
                 <span className={`text-sm font-bold ${futurePrediction.overall_trajectory.status.toLowerCase().includes("improv") ? "text-success" :
                   futurePrediction.overall_trajectory.status.toLowerCase().includes("stable") ? "text-primary" :
                     "text-warning"
@@ -271,7 +334,7 @@ export default function ReportsPage() {
           </div>
 
           {integratedData.length === 0 ? (
-            <div className="py-20 text-center text-slate-400 italic">No progression data available yet. Please complete more lab tests.</div>
+            <div className="py-20 text-center text-slate-400 italic">{tr("noProgressionData")}</div>
           ) : (
             <div className="h-[400px] w-full">
               <ResponsiveContainer width="100%" height="100%">
@@ -288,14 +351,14 @@ export default function ReportsPage() {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fill: '#94a3b8', fontSize: 12 }}
-                    tickFormatter={(v) => v === "Next 6M" ? "Forecast" : String(v).slice(5, 10)}
+                    tickFormatter={(v) => v === "Next 6M" ? tr("forecast") : String(v).slice(5, 10)}
                   />
                   <YAxis
                     domain={[0, 10]}
                     axisLine={false}
                     tickLine={false}
                     tick={{ fill: '#94a3b8', fontSize: 12 }}
-                    label={{ value: 'Severity', angle: -90, position: 'insideLeft', offset: 10, fill: '#94a3b8', fontSize: 12 }}
+                    label={{ value: tr("severity"), angle: -90, position: 'insideLeft', offset: 10, fill: '#94a3b8', fontSize: 12 }}
                   />
                   <Tooltip content={<CustomTooltip />} />
                   <Legend verticalAlign="top" height={36} />
@@ -304,7 +367,7 @@ export default function ReportsPage() {
                     dataKey="severity_score"
                     stroke="var(--primary)"
                     strokeWidth={4}
-                    name="Condition Severity"
+                    name={tr("conditionSeverity")}
                     dot={{ r: 6, fill: 'white', strokeWidth: 2 }}
                     activeDot={{ r: 8, strokeWidth: 0 }}
                   />
@@ -322,7 +385,7 @@ export default function ReportsPage() {
                   <TrendingUp size={24} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary/80 mb-2">AI Clinical Insight Summary</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary/80 mb-2">{tr("aiClinicalInsightSummary")}</p>
                   <div className="prose prose-invert prose-sm">
                     <p className="text-base leading-relaxed text-slate-100 font-medium">
                       {recommendations?.summary || futurePrediction.overall_trajectory.message}
@@ -343,8 +406,8 @@ export default function ReportsPage() {
               <CheckCircle size={24} />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-slate-800">Your Personalized Action Plan</h3>
-              <p className="text-sm text-slate-500">Evidence-based recommendations based on your unique profile.</p>
+              <h3 className="text-xl font-bold text-slate-800">{tr("yourPersonalizedActionPlan")}</h3>
+              <p className="text-sm text-slate-500">{tr("yourPersonalizedActionPlanSubtitle")}</p>
             </div>
           </div>
 
@@ -360,7 +423,7 @@ export default function ReportsPage() {
             </div>
           ) : (
             <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              <p className="text-sm text-slate-400 italic">Recommendations will appear here once enough medical data is available for analysis.</p>
+              <p className="text-sm text-slate-400 italic">{tr("recommendationsWillAppear")}</p>
             </div>
           )}
         </div>
@@ -369,8 +432,8 @@ export default function ReportsPage() {
       {!loading && !patientId && !isPatient && (
         <div className="card p-12 text-center text-slate-400">
           <BarChart3 size={48} className="mx-auto mb-4 opacity-10" />
-          <p className="text-lg font-medium">Ready to analyze patient trajectory?</p>
-          <p className="text-sm">Enter a Patient ID and select a disease above to generate a high-impact health report.</p>
+          <p className="text-lg font-medium">{tr("readyToAnalyzeTrajectory")}</p>
+          <p className="text-sm">{tr("enterPatientIdToAnalyze")}</p>
         </div>
       )}
     </motion.div>

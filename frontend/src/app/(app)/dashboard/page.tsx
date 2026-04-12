@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import {
   Activity, FlaskConical, Dna, Lightbulb, Users, Stethoscope,
   BarChart3, UserPlus, CalendarDays, Upload, Brain, GitBranch,
-  Building2, Globe, ArrowRight, TrendingUp, AlertTriangle, CheckCircle,
+  Building2, ArrowRight, TrendingUp, AlertTriangle, CheckCircle,
   type LucideIcon,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
@@ -14,6 +14,8 @@ import { StatCard } from "@/components/ui/StatCard";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getUser } from "@/lib/auth-store";
+import { useLanguage } from "@/components/providers/LanguageProvider";
+import { translateDynamicTexts } from "@/lib/dynamic-translation";
 import type { RoleName } from "@/lib/types";
 
 type Patient = {
@@ -63,19 +65,20 @@ type Recommendations = {
 
 type DiseaseStatus = {
   disease: string;
+  disease_label?: string;
   latest_stage: string;
   severity: number;
 };
 
-type QuickAction = { label: string; href: string; icon: LucideIcon; roles: RoleName[] };
+type QuickAction = { labelKey: string; href: string; icon: LucideIcon; roles: RoleName[] };
 
 const quickActions: QuickAction[] = [
-  { label: "Register Patient", href: "/patients", icon: UserPlus, roles: ["admin"] },
-  { label: "Create Visit", href: "/visits", icon: CalendarDays, roles: ["admin", "doctor"] },
-  { label: "Upload Lab Report", href: "/labs", icon: Upload, roles: ["admin", "lab", "doctor"] },
-  { label: "View Reports", href: "/reports", icon: BarChart3, roles: ["admin", "doctor", "patient"] },
-  { label: "Family Tree", href: "/family", icon: GitBranch, roles: ["admin", "doctor", "patient"] },
-  { label: "Manage Doctors", href: "/doctors", icon: Building2, roles: ["admin"] },
+  { labelKey: "registerPatient", href: "/patients", icon: UserPlus, roles: ["admin"] },
+  { labelKey: "createVisit", href: "/visits", icon: CalendarDays, roles: ["admin", "doctor"] },
+  { labelKey: "uploadLabReport", href: "/labs", icon: Upload, roles: ["admin", "lab", "doctor"] },
+  { labelKey: "viewReports", href: "/reports", icon: BarChart3, roles: ["admin", "doctor", "patient"] },
+  { labelKey: "familyTree", href: "/family", icon: GitBranch, roles: ["admin", "doctor", "patient"] },
+  { labelKey: "manageDoctors", href: "/doctors", icon: Building2, roles: ["admin"] },
 ];
 
 
@@ -109,6 +112,7 @@ const fadeUp = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { tr, language } = useLanguage();
   const [localViewMode, setLocalViewMode] = useState<"clinical" | "personal">("clinical");
   const user = getUser();
   const userRoles: RoleName[] = (user?.roles ?? []) as RoleName[];
@@ -136,7 +140,7 @@ export default function DashboardPage() {
     } else {
       loadAdminStats();
     }
-  }, [isPatient, patientId]);
+  }, [isPatient, patientId, language]);
 
 
   async function loadPatientDashboard(pid: string) {
@@ -153,12 +157,9 @@ export default function DashboardPage() {
         ),
       ]);
 
-      if (profileData) setProfile(profileData);
-      if (riskData) setRisk(riskData);
-      if (recsData) setRecs(recsData.recommendations ?? recsData.next_steps ?? []);
-
+      const recList = recsData?.recommendations ?? recsData?.next_steps ?? [];
+      const labs: typeof recentLabs = [];
       if (labData?.measurements) {
-        const labs: typeof recentLabs = [];
         for (const [testName, info] of Object.entries(labData.measurements)) {
           const pts = info.data_points;
           if (pts.length > 0) {
@@ -166,7 +167,6 @@ export default function DashboardPage() {
             labs.push({ test: testName, value: latest.value, unit: info.unit ?? "", abnormal: latest.is_abnormal });
           }
         }
-        setRecentLabs(labs.slice(0, 6));
       }
 
       const dList: DiseaseStatus[] = [];
@@ -181,10 +181,32 @@ export default function DashboardPage() {
           });
         }
       });
-      setDiseases(dList);
+
+      const textsToTranslate = [
+        ...dList.map((d) => d.disease),
+        ...dList.map((d) => d.latest_stage),
+        ...labs.slice(0, 6).map((l) => l.test),
+        ...(riskData?.message ? [riskData.message] : []),
+        ...recList,
+      ];
+      const translated = await translateDynamicTexts(textsToTranslate, language);
+      const trText = (value: string) => translated[value] ?? value;
+
+      if (profileData) setProfile(profileData);
+      if (riskData) setRisk({ ...riskData, message: trText(riskData.message) });
+      setRecs(recList.map((r) => trText(r)));
+      setRecentLabs(labs.slice(0, 6).map((l) => ({ ...l, test: trText(l.test) })));
+      setDiseases(
+        dList.map((d) => ({
+          ...d,
+          disease: d.disease,
+          disease_label: trText(d.disease),
+          latest_stage: trText(d.latest_stage),
+        }))
+      );
       setLoaded(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load dashboard");
+      setError(e instanceof Error ? e.message : tr("failedToLoadDashboard"));
       setLoaded(true);
     }
   }
@@ -211,89 +233,81 @@ export default function DashboardPage() {
         <div className="flex items-center justify-center h-[60vh]">
           <div className="flex flex-col items-center gap-3">
             <Activity size={32} className="animate-spin text-primary" />
-            <span className="text-sm text-muted">Loading your health dashboard...</span>
+            <span className="text-sm text-muted">{tr("loadingHealthDashboard")}</span>
           </div>
         </div>
       );
     }
 
     return (
-      <motion.div className="space-y-5" initial="hidden" animate="show" variants={stagger}>
+      <motion.div className="mx-auto w-full max-w-6xl space-y-10 px-2 sm:px-8 xl:px-0 py-8 bg-gradient-to-br from-[#181f2a] via-[#1a2233] to-[#232b3e] min-h-[90vh] rounded-3xl shadow-2xl" initial="hidden" animate="show" variants={stagger}>
         {/* Hero Card */}
-        <motion.div variants={fadeUp} className="card-gradient p-6">
-          <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <motion.div variants={fadeUp} className="backdrop-blur-lg bg-white/5 border border-white/10 rounded-2xl shadow-lg p-10">
+          <div className="relative z-10 flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm text-white/70">Welcome back,</p>
-              <h1 className="text-2xl font-bold">
-                {profile ? `${profile.first_name} ${profile.last_name}` : user?.username ?? "Patient"}
+              <p className="text-base text-blue-200 font-semibold tracking-wide mb-1 flex items-center gap-2">
+                <Activity size={18} className="inline-block text-blue-400" /> {tr("welcomeBack")}
+              </p>
+              <h1 className="text-3xl font-extrabold text-white drop-shadow-lg">
+                {profile ? `${profile.first_name} ${profile.last_name}` : user?.username ?? tr("patients")}
               </h1>
-              <p className="mt-1 text-sm text-white/60">Your personal health dashboard</p>
+              <p className="mt-2 text-lg text-blue-100 font-medium">{tr("personalHealthDashboard")}</p>
               {isDoctor && (
                 <button
                   onClick={() => setLocalViewMode("clinical")}
-                  className="mt-4 flex items-center gap-1.5 text-xs font-bold text-white/80 hover:text-white"
+                  className="mt-5 flex items-center gap-2 text-sm font-bold text-blue-200 hover:text-white transition-colors"
                 >
-                  <ArrowRight size={14} className="rotate-180" /> Back to Clinical Dashboard
+                  <ArrowRight size={16} className="rotate-180" /> {tr("backToClinicalDashboard")}
                 </button>
               )}
             </div>
 
+            <div className="flex flex-col gap-3 items-start sm:items-end">
             {profile && (
-              <div className="flex gap-5 text-white/80">
-                <div className="text-center">
-                  <div className="text-2xl font-bold">{computeAge(profile.date_of_birth)}</div>
-                  <div className="text-xs text-white/50">Age</div>
+              <div className="flex gap-8 text-white/90">
+                <div className="flex flex-col items-center">
+                  <div className="text-3xl font-extrabold drop-shadow-md">{computeAge(profile.date_of_birth)}</div>
+                  <div className="text-xs text-blue-200 mt-1">{tr("age")}</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold">{profile.blood_group ?? "—"}</div>
-                  <div className="text-xs text-white/50">Blood</div>
+                <div className="flex flex-col items-center">
+                  <div className="text-3xl font-extrabold drop-shadow-md">{profile.blood_group ?? "—"}</div>
+                  <div className="text-xs text-blue-200 mt-1">{tr("blood")}</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold capitalize">{profile.gender}</div>
-                  <div className="text-xs text-white/50">Gender</div>
+                <div className="flex flex-col items-center">
+                  <div className="text-3xl font-extrabold capitalize drop-shadow-md">{profile.gender}</div>
+                  <div className="text-xs text-blue-200 mt-1">{tr("gender")}</div>
                 </div>
               </div>
             )}
+            </div>
           </div>
         </motion.div>
 
         {error && <div className="alert-error">{error}</div>}
 
-        {/* Quick Stats */}
-        <motion.div variants={fadeUp} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard title="Active Conditions" value={diseases.length} icon={<Activity size={20} />} />
-          <StatCard title="Latest Labs" value={recentLabs.length} icon={<FlaskConical size={20} />} />
-          <StatCard
-            title="Family Risk"
-            value={risk?.status === "risks_identified" ? "At Risk" : "Low"}
-            icon={<Dna size={20} />}
-          />
-          <StatCard title="Recommendations" value={recs.length} icon={<Lightbulb size={20} />} />
-        </motion.div>
-
         {/* Disease Progress Cards */}
         {diseases.length > 0 && (
-          <motion.div variants={fadeUp} className="card p-5">
+          <motion.div variants={fadeUp} className="card p-6">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
               <TrendingUp size={20} className="text-primary" />
-              <span className="gradient-text">Active Conditions</span>
+              <span className="gradient-text">{tr("activeConditions")}</span>
             </h2>
             <div className="space-y-4">
               {diseases.map((d) => (
                 <div key={d.disease} className="rounded-xl border border-border p-4 transition-colors hover:border-primary/30">
                   <div className="mb-2 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold capitalize">{d.disease.replace(/_/g, " ")}</span>
+                      <span className="font-semibold capitalize">{(d.disease_label ?? d.disease).replace(/_/g, " ")}</span>
                       <span className="badge bg-primary/10 text-primary">{d.latest_stage}</span>
                     </div>
                     <button
                       className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                       onClick={() => router.push(`/reports?disease=${d.disease}`)}
                     >
-                      View Timeline <ArrowRight size={12} />
+                      {tr("viewTimeline")} <ArrowRight size={12} />
                     </button>
                   </div>
-                  <ProgressBar value={d.severity} label="Severity Score" />
+                  <ProgressBar value={d.severity} label={tr("severityScore")} />
                 </div>
               ))}
             </div>
@@ -302,20 +316,20 @@ export default function DashboardPage() {
 
         {/* Recent Lab Results */}
         {recentLabs.length > 0 && (
-          <motion.div variants={fadeUp} className="card p-5">
+          <motion.div variants={fadeUp} className="card p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-lg font-semibold">
                 <FlaskConical size={20} className="text-primary" />
-                <span className="gradient-text">Latest Lab Results</span>
+                <span className="gradient-text">{tr("latestLabResults")}</span>
               </h2>
               <button
                 className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 onClick={() => router.push("/labs")}
               >
-                View All <ArrowRight size={12} />
+                {tr("viewAll")} <ArrowRight size={12} />
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {recentLabs.map((lab) => (
                 <div
                   key={lab.test}
@@ -330,11 +344,11 @@ export default function DashboardPage() {
                   <div className="mt-1">
                     {lab.abnormal ? (
                       <span className="badge bg-danger/15 text-danger">
-                        <AlertTriangle size={10} /> Abnormal
+                        <AlertTriangle size={10} /> {tr("abnormal")}
                       </span>
                     ) : (
                       <span className="badge bg-success/15 text-success">
-                        <CheckCircle size={10} /> Normal
+                        <CheckCircle size={10} /> {tr("normal")}
                       </span>
                     )}
                   </div>
@@ -345,53 +359,61 @@ export default function DashboardPage() {
         )}
 
         {/* Family Risk + Recommendations */}
-        <motion.div variants={fadeUp} className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="card p-5">
+        <motion.div variants={fadeUp} className="grid grid-cols-1 gap-6 items-stretch">
+          <div className="card p-6 flex flex-col h-full">
             <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
               <Dna size={20} className="text-primary" />
-              <span className="gradient-text">Hereditary Risk</span>
+              <span className="gradient-text">{tr("hereditaryRisk")}</span>
             </h2>
             {risk ? (
-              <div>
-                <p className="text-sm">{risk.message}</p>
+              <div className="space-y-3">
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm">
+                  {risk.message}
+                </div>
                 {risk.ancestors_count != null && (
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <div className="rounded-lg bg-background p-3 text-center">
-                      <div className="text-xl font-bold">{risk.ancestors_count}</div>
-                      <div className="text-xs text-muted">Relatives Analyzed</div>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-muted">{tr("relativesAnalyzed")}</div>
+                        <div className="text-xl font-bold tabular-nums">{risk.ancestors_count}</div>
+                      </div>
                     </div>
-                    <div className="rounded-lg bg-background p-3 text-center">
-                      <div className="text-xl font-bold text-warning">{risk.ancestors_with_diseases_count ?? 0}</div>
-                      <div className="text-xs text-muted">With Conditions</div>
+                    <div className="rounded-xl border border-warning/30 bg-warning/5 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-muted">{tr("withConditions")}</div>
+                        <div className="text-xl font-bold tabular-nums text-warning">{risk.ancestors_with_diseases_count ?? 0}</div>
+                      </div>
                     </div>
                   </div>
                 )}
-                <button className="btn-primary mt-4 w-full text-sm" onClick={() => router.push("/family")}>
-                  <GitBranch size={16} /> View Family Tree
+                <button className="btn-primary w-full text-sm" onClick={() => router.push("/family")}>
+                  <GitBranch size={16} /> {tr("viewFamilyTree")}
                 </button>
               </div>
             ) : (
-              <p className="text-sm text-muted">No family risk data available. Link family members to enable hereditary risk analysis.</p>
+              <p className="text-sm text-muted">{tr("noFamilyRiskData")}</p>
             )}
           </div>
 
-          <div className="card p-5">
+          <div className="card p-6 flex flex-col h-full">
             <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
               <Lightbulb size={20} className="text-primary" />
-              <span className="gradient-text">AI Recommendations</span>
+              <span className="gradient-text">{tr("aiRecommendations")}</span>
             </h2>
             {recs.length > 0 ? (
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {recs.slice(0, 5).map((r, i) => (
-                  <li key={i} className="flex gap-2 rounded-lg border border-border p-3 text-sm transition-colors hover:border-primary/20">
-                    <CheckCircle size={14} className="mt-0.5 shrink-0 text-primary" />
-                    <span>{r}</span>
+                  <li key={i} className="flex items-start gap-3 rounded-xl border border-border bg-background p-3 text-sm transition-all hover:border-primary/30 hover:bg-primary/5">
+                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      {i + 1}
+                    </div>
+                    <span className="leading-relaxed">{r}</span>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="text-sm text-muted">
-                AI recommendations will appear here based on your medical history and lab data.
+                {tr("aiRecommendationsPlaceholder")}
               </p>
             )}
           </div>
@@ -403,9 +425,9 @@ export default function DashboardPage() {
 
   /* ═══ ADMIN / DOCTOR / LAB DASHBOARD ═══ */
   const roleGreetings: Record<string, string> = {
-    admin: "System Administrator",
-    doctor: "Healthcare Provider",
-    lab: "Laboratory Portal",
+    admin: tr("systemAdministrator"),
+    doctor: tr("healthcareProvider"),
+    lab: tr("laboratoryPortal"),
   };
 
   return (
@@ -413,10 +435,10 @@ export default function DashboardPage() {
       <motion.div variants={fadeUp} className="card-gradient p-6">
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <p className="text-sm text-white/70">{roleGreetings[primaryRole] ?? "Welcome"}</p>
-            <h1 className="text-2xl font-bold">{user?.username ?? "User"}</h1>
+            <p className="text-sm text-white/70">{roleGreetings[primaryRole] ?? tr("welcome")}</p>
+            <h1 className="text-2xl font-bold">{user?.username ?? tr("unknownUser")}</h1>
             <p className="mt-1 text-sm text-white/60">
-              Manage clinical records and AI-powered health predictions.
+              {tr("manageClinicalRecords")}
             </p>
           </div>
           {isDoctor && patientId && (
@@ -425,7 +447,7 @@ export default function DashboardPage() {
               className="btn-ghost bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20"
             >
               <Activity size={16} className="mr-2" />
-              Switch to My Health
+              {tr("switchToMyHealth")}
             </button>
           )}
         </div>
@@ -437,24 +459,24 @@ export default function DashboardPage() {
       <motion.div variants={fadeUp} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {userRoles.some((r) => ["admin", "doctor"].includes(r)) && (
           <>
-            <StatCard title="Patients" value={stats.patients} subtitle="Registered records" icon={<Users size={20} />} />
-            <StatCard title="Doctors" value={stats.doctors} subtitle="Active providers" icon={<Stethoscope size={20} />} />
+            <StatCard title={tr("patients")} value={stats.patients} subtitle={tr("registeredRecords")} icon={<Users size={20} />} />
+            <StatCard title={tr("doctors")} value={stats.doctors} subtitle={tr("activeProviders")} icon={<Stethoscope size={20} />} />
           </>
         )}
         {userRoles.some((r) => ["admin", "lab", "doctor"].includes(r)) && (
-          <StatCard title="Labs" value={stats.labs} subtitle="Connected labs" icon={<FlaskConical size={20} />} />
+          <StatCard title={tr("labs")} value={stats.labs} subtitle={tr("connectedLabs")} icon={<FlaskConical size={20} />} />
         )}
-        <StatCard title="Reports" value={stats.reports} subtitle="Lab reports" icon={<BarChart3 size={20} />} />
+        <StatCard title={tr("reports")} value={stats.reports} subtitle={tr("labReportsCount")} icon={<BarChart3 size={20} />} />
       </motion.div>
 
       <motion.div variants={fadeUp} className="card p-5">
-        <h2 className="mb-4 text-lg font-semibold">Quick Actions</h2>
+        <h2 className="mb-4 text-lg font-semibold">{tr("quickActions")}</h2>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {visibleActions.map((a) => {
             const Icon = a.icon;
             return (
               <motion.button
-                key={a.label}
+                key={a.labelKey}
                 className="btn-ghost flex items-center gap-2.5 text-sm"
                 onClick={() => router.push(a.href)}
                 whileHover={{ scale: 1.02 }}
@@ -463,7 +485,7 @@ export default function DashboardPage() {
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <Icon size={16} />
                 </div>
-                {a.label}
+                {tr(a.labelKey)}
               </motion.button>
             );
           })}

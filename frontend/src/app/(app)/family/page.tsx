@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
 import { PatientSearch } from "@/components/ui/PatientSearch";
+import { useLanguage } from "@/components/providers/LanguageProvider";
 import { CheckCircle } from "lucide-react";
 
 
@@ -113,16 +114,17 @@ const riskColors = {
   low: { bg: "bg-emerald-500/10", text: "text-emerald-500", border: "border-emerald-500/30", bar: "bg-emerald-500" },
 };
 
-const generationMeta: Record<Generation, { label: string; icon: typeof Users }> = {
-  grandparents: { label: "Grandparents", icon: Crown },
-  parents: { label: "Parents & Extended", icon: Users },
-  self: { label: "You & Siblings", icon: User },
-  children: { label: "Children", icon: Baby },
+const generationMeta: Record<Generation, { labelKey: string; icon: typeof Users }> = {
+  grandparents: { labelKey: "grandparents", icon: Crown },
+  parents: { labelKey: "parentsAndExtended", icon: Users },
+  self: { labelKey: "youAndSiblings", icon: User },
+  children: { labelKey: "children", icon: Baby },
 };
 
 /* ═══════════════════════════════════════════ */
 
 export default function FamilyPage() {
+  const { tr, language } = useLanguage();
   const [localViewMode, setLocalViewMode] = useState<"clinical" | "personal">("clinical");
   const [patientId, setPatientId] = useState("");
   const [isPatient, setIsPatient] = useState(false);
@@ -147,7 +149,7 @@ export default function FamilyPage() {
 
   useEffect(() => {
     if (patientId) loadTree(patientId);
-  }, [patientId]);
+  }, [patientId, language]);
 
 
 
@@ -159,7 +161,7 @@ export default function FamilyPage() {
       );
       setData(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load family tree");
+      setError(e instanceof Error ? e.message : tr("failedToLoadFamilyTree"));
     } finally {
       setLoading(false);
     }
@@ -175,10 +177,10 @@ export default function FamilyPage() {
 
   if (data) {
     // Add self node
-    generations.self.push({
-      id: data.patient_id,
-      name: data.patient_name,
-      label: "You",
+      generations.self.push({
+        id: data.patient_id,
+        name: data.patient_name,
+        label: tr("you"),
       hasDiseases: false,
       diseaseCount: 0,
       isSelf: true,
@@ -216,8 +218,8 @@ export default function FamilyPage() {
       className="space-y-6"
     >
       <PageHeader
-        title={isPatient ? "My Family Tree" : "Family Tree & Hereditary Risk"}
-        subtitle={isPatient ? "Your family hierarchy and inherited disease risk." : "Patient family hierarchy and inherited disease signals."}
+        title={isPatient ? tr("myFamilyTree") : tr("familyTreeAndRisk")}
+        subtitle={isPatient ? tr("myFamilyTreeSubtitle") : tr("familyTreeSubtitle")}
         icon={<GitBranch size={20} />}
         right={
           <div className="flex flex-col md:flex-row items-end md:items-center gap-4">
@@ -233,13 +235,13 @@ export default function FamilyPage() {
                   onClick={() => setLocalViewMode("clinical")}
                   className={`px-3 py-1.5 text-xs font-bold rounded-full transition ${localViewMode === "clinical" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
                 >
-                  Patients
+                  {tr("patients")}
                 </button>
                 <button
                   onClick={() => setLocalViewMode("personal")}
                   className={`px-3 py-1.5 text-xs font-bold rounded-full transition ${localViewMode === "personal" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-emerald-500"}`}
                 >
-                  Personal
+                  {tr("personal")}
                 </button>
               </div>
             )}
@@ -266,8 +268,8 @@ export default function FamilyPage() {
         >
           <div className="flex items-center gap-2 mb-6">
             <Users size={18} className="text-primary" />
-            <h2 className="text-base font-semibold">Family Hierarchy</h2>
-            <span className="text-xs text-muted ml-auto">{data.total_blood_relatives} relatives</span>
+            <h2 className="text-base font-semibold">{tr("familyHierarchy")}</h2>
+            <span className="text-xs text-muted ml-auto">{data.total_blood_relatives} {tr("relatives")}</span>
           </div>
 
           <div className="flex flex-col items-center gap-0">
@@ -286,7 +288,7 @@ export default function FamilyPage() {
                   {/* Generation label */}
                   <div className="flex items-center gap-1.5 text-xs font-medium text-muted mb-3 px-3 py-1 rounded-full bg-primary/5 border border-primary/10">
                     <Icon size={12} />
-                    {meta.label}
+                    {tr(meta.labelKey)}
                   </div>
 
                   {/* Members row */}
@@ -323,7 +325,7 @@ export default function FamilyPage() {
                         </span>
                         {!member.isBlood && (
                           <span className="text-[9px] mt-0.5 px-1.5 py-0.5 rounded bg-white/10 text-muted">
-                            non-blood
+                            {tr("nonBlood")}
                           </span>
                         )}
                       </motion.div>
@@ -342,16 +344,16 @@ export default function FamilyPage() {
           {/* Legend */}
           <div className="mt-6 pt-4 border-t border-border flex flex-wrap gap-4 text-xs text-muted">
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 rounded-full bg-gradient-to-r from-primary to-primary/80" /> You
+              <span className="inline-block h-3 w-3 rounded-full bg-gradient-to-r from-primary to-primary/80" /> {tr("you")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 rounded border border-border bg-card" /> Healthy
+              <span className="inline-block h-3 w-3 rounded border border-border bg-card" /> {tr("healthy")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 rounded border-2 border-red-500/40 bg-red-500/5" /> Has diseases
+              <span className="inline-block h-3 w-3 rounded border-2 border-red-500/40 bg-red-500/5" /> {tr("hasDiseases")}
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-5 rounded bg-red-500 text-white text-[8px] text-center leading-[12px] font-bold">2</span> Disease count
+              <span className="inline-block h-3 w-5 rounded bg-red-500 text-white text-[8px] text-center leading-[12px] font-bold">2</span> {tr("diseaseCount")}
             </span>
           </div>
         </motion.div>
@@ -367,10 +369,10 @@ export default function FamilyPage() {
         >
           <div className="flex items-center gap-2 mb-2">
             <Dna size={18} className="text-primary" />
-            <h2 className="text-base font-semibold">Hereditary Disease Risk</h2>
+            <h2 className="text-base font-semibold">{tr("hereditaryRisk")}</h2>
           </div>
           <p className="text-xs text-muted mb-5">
-            Based on your blood relatives&apos; medical history, these diseases may be hereditary. More affected relatives = higher risk.
+            {tr("hereditaryRiskHelp")}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -396,7 +398,7 @@ export default function FamilyPage() {
                       <span className="font-semibold capitalize text-sm">{risk.disease}</span>
                     </div>
                     <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} border ${colors.border}`}>
-                      {risk.riskLevel} risk
+                      {risk.riskLevel} {tr("risk")}
                     </span>
                   </div>
 
@@ -411,7 +413,7 @@ export default function FamilyPage() {
                   {/* Affected relatives */}
                   <div className="space-y-1">
                     <span className="text-[10px] font-medium text-muted uppercase tracking-wider">
-                      {risk.bloodRelativeCount} affected relative{risk.bloodRelativeCount !== 1 ? "s" : ""}
+                      {risk.bloodRelativeCount} {tr("affectedRelatives")}
                     </span>
                     {risk.affectedRelatives.map((ar, i) => (
                       <div key={i} className="flex items-center gap-2 text-xs">
@@ -430,12 +432,9 @@ export default function FamilyPage() {
           <div className="mt-5 rounded-xl bg-primary/5 border border-primary/15 p-4 flex items-start gap-3">
             <Dna size={20} className="text-primary mt-0.5 shrink-0" />
             <div className="text-sm">
-              <p className="font-medium mb-1">What does this mean?</p>
+              <p className="font-medium mb-1">{tr("whatDoesThisMean")}</p>
               <p className="text-muted text-xs leading-relaxed">
-                Diseases appearing in multiple blood relatives suggest a possible hereditary pattern.
-                A &quot;High Risk&quot; label means 3+ blood relatives share the condition.
-                This does <strong>not</strong> guarantee you will develop it &mdash; consult your doctor
-                for genetic counseling and preventive screening.
+                {tr("hereditaryRiskDisclaimer")}
               </p>
             </div>
           </div>
@@ -446,16 +445,16 @@ export default function FamilyPage() {
       {!data && !loading && !error && (
         <div className="card p-8 text-center text-muted">
           {isPatient
-            ? "Loading your family tree..."
-            : "Enter a Patient ID above and click \"Load Tree\" to visualize family relationships."}
+            ? tr("loadingFamilyTree")
+            : tr("enterPatientIdFamilyTree")}
         </div>
       )}
 
       {data && risks.length === 0 && !loading && (
         <div className="card p-6 text-center">
           <Heart size={32} className="mx-auto mb-3 text-emerald-500" />
-          <p className="font-medium text-sm">No hereditary disease risks detected</p>
-          <p className="text-xs text-muted mt-1">None of the blood relatives in the family tree have recorded disease history.</p>
+          <p className="font-medium text-sm">{tr("noHereditaryRisk")}</p>
+          <p className="text-xs text-muted mt-1">{tr("noHereditaryRiskSubtitle")}</p>
         </div>
       )}
     </motion.div>

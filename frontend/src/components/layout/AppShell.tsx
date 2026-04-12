@@ -32,7 +32,9 @@ const navItems: NavItem[] = [
   { href: "/family", key: "familyTree", icon: GitBranch, roles: ["admin", "doctor", "patient"] },
   { href: "/doctors", key: "doctors", icon: Stethoscope, roles: ["admin", "doctor"] },
   { href: "/visits", key: "visits", patientKey: "myVisits", icon: CalendarDays, roles: ["admin", "doctor", "patient"] },
-  { href: "/labs", key: "labs", patientKey: "labReports", icon: FlaskConical, roles: ["admin", "doctor", "lab", "patient"] },
+  { href: "/labs", key: "labs", patientKey: "labReports", icon: FlaskConical, roles: ["admin", "doctor", "patient"] },
+  { href: "/labs/labs", key: "labs", icon: FlaskConical, roles: ["lab"] },
+  { href: "/labs/reports", key: "reports", icon: BarChart3, roles: ["lab"] },
   { href: "/reports", key: "reports", patientKey: "healthReports", icon: BarChart3, roles: ["admin", "doctor", "patient"] },
 ];
 
@@ -49,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const { draftLanguage, setDraftLanguage, applyLanguage, tr } = useLanguage();
+  const { language, changeLanguage, tr } = useLanguage();
   const [viewMode, setViewMode] = useState<"clinical" | "personal">("clinical");
   const user = getUser();
   const userRoles: RoleName[] = user?.roles ?? [];
@@ -69,6 +71,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   async function handleLogout() {
     await logout();
     router.push("/sign-in");
+  }
+
+  function handleLanguageChange(nextLanguage: AppLanguage) {
+    if (nextLanguage === language) return;
+    changeLanguage(nextLanguage);
+    // Soft refresh current route so client pages re-run data loaders immediately.
+    router.refresh();
   }
 
   return (
@@ -100,28 +109,20 @@ export function AppShell({ children }: { children: ReactNode }) {
             {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
           <div className="hidden items-center gap-3 md:flex">
-            {primaryRole === "admin" && (
-              <>
-                <div className="flex items-center gap-1.5 rounded-lg border border-border/50 px-2.5 py-1.5">
-                  <Languages size={14} className="text-muted" />
-                  <select
-                    className="bg-transparent text-xs font-medium outline-none cursor-pointer"
-                    value={draftLanguage}
-                    onChange={(e) => setDraftLanguage(e.target.value as AppLanguage)}
-                  >
-                    <option value="en">EN</option>
-                    <option value="ur">UR</option>
-                    <option value="ar">AR</option>
-                    <option value="hi">HI</option>
-                    <option value="bn">BN</option>
-                  </select>
-                </div>
-                <button className="btn-ghost text-xs px-3 py-1.5" onClick={applyLanguage}>
-                  {tr("translatePage")}
-                </button>
-                <div className="h-5 w-px bg-border/50" />
-              </>
-            )}
+            <div className="flex items-center gap-1.5 rounded-lg border border-border/50 px-2.5 py-1.5">
+              <Languages size={14} className="text-muted" />
+              <select
+                className="bg-transparent text-xs font-medium outline-none cursor-pointer"
+                value={language}
+                onChange={(e) => handleLanguageChange(e.target.value as AppLanguage)}
+              >
+                <option value="en">EN</option>
+                <option value="ur">UR</option>
+                <option value="fr">FR</option>
+                <option value="de">DE</option>
+              </select>
+            </div>
+            <div className="h-5 w-px bg-border/50" />
 
             {showDualToggle && (
               <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 mr-4">
@@ -177,19 +178,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Languages size={14} className="text-muted" />
                   <select
                     className="flex-1 bg-transparent text-sm outline-none"
-                    value={draftLanguage}
-                    onChange={(e) => setDraftLanguage(e.target.value as AppLanguage)}
+                    value={language}
+                    onChange={(e) => handleLanguageChange(e.target.value as AppLanguage)}
                   >
                     <option value="en">English</option>
                     <option value="ur">Urdu</option>
-                    <option value="ar">Arabic</option>
-                    <option value="hi">Hindi</option>
-                    <option value="bn">Bengali</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
                   </select>
                 </div>
-                <button className="btn-ghost w-full text-sm" onClick={applyLanguage}>
-                  {tr("translatePage")}
-                </button>
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 px-3 py-2.5 text-sm font-semibold text-red-500 transition-colors hover:bg-red-500/20"
                   onClick={handleLogout}

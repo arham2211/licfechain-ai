@@ -7,6 +7,7 @@ import { CalendarDays, Plus, X } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
+import { useLanguage } from "@/components/providers/LanguageProvider";
 
 type Visit = {
   visit_id: string;
@@ -35,6 +36,7 @@ type DoctorOption = {
 const VISIT_TYPES = ["consultation", "follow_up", "routine_checkup", "lab_review", "emergency"];
 
 export default function VisitsPage() {
+  const { tr, language } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
   const presetPatientId = searchParams.get("patient_id") ?? "";
@@ -63,8 +65,9 @@ export default function VisitsPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    setForm((prev) => ({ ...prev, patient_id: presetPatientId || prev.patient_id }));
     loadVisits();
-  }, []);
+  }, [presetPatientId, language]);
 
   async function loadVisits() {
     try {
@@ -73,7 +76,7 @@ export default function VisitsPage() {
       const data = await api.request<Visit[]>(url);
       setRows(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load visits");
+      setError(e instanceof Error ? e.message : tr("failedToLoadVisits"));
     }
   }
 
@@ -116,11 +119,11 @@ export default function VisitsPage() {
         chief_complaint: "",
         doctor_notes: "",
       });
-      setSuccessMsg("Visit created successfully");
+      setSuccessMsg(tr("visitCreatedSuccessfully"));
       setTimeout(() => setSuccessMsg(null), 3000);
       await loadVisits();
     } catch (e) {
-      setCreateError(e instanceof Error ? e.message : "Failed to create visit");
+      setCreateError(e instanceof Error ? e.message : tr("failedToCreateVisit"));
     } finally {
       setCreating(false);
     }
@@ -129,13 +132,13 @@ export default function VisitsPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-4">
       <PageHeader
-        title="Visits"
-        subtitle="Consultations, follow-ups, and lab review encounters."
+        title={tr("visits")}
+        subtitle={tr("visitsSubtitle")}
         icon={<CalendarDays size={20} />}
         right={
           canCreate ? (
             <button className="btn-primary" onClick={openCreate}>
-              <Plus size={16} /> New Visit
+              <Plus size={16} /> {tr("newVisit")}
             </button>
           ) : undefined
         }
@@ -149,24 +152,24 @@ export default function VisitsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Create New Visit</h2>
+              <h2 className="text-lg font-semibold">{tr("createNewVisit")}</h2>
               <button className="rounded-md border border-border px-3 py-1 text-sm" onClick={() => setShowCreate(false)}><X size={16} /></button>
             </div>
             <form className="mt-4 space-y-4" onSubmit={handleCreate}>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Patient *</label>
+                  <label className="mb-1 block text-sm font-medium">{tr("patient")} *</label>
                   <select className="input" value={form.patient_id} onChange={(e) => setForm({ ...form, patient_id: e.target.value })} required>
-                    <option value="">-- Select patient --</option>
+                    <option value="">{tr("selectPatientOption")}</option>
                     {patients.map((p) => (
                       <option key={p.patient_id} value={p.patient_id}>{p.first_name} {p.last_name} ({p.cnic})</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Doctor *</label>
+                  <label className="mb-1 block text-sm font-medium">{tr("doctor")} *</label>
                   <select className="input" value={form.doctor_patient_id} onChange={(e) => setForm({ ...form, doctor_patient_id: e.target.value })} required>
-                    <option value="">-- Select doctor --</option>
+                    <option value="">{tr("selectDoctorOption")}</option>
                     {doctors.map((d) => (
                       <option key={d.patient_id} value={d.patient_id}>Dr. {d.first_name} {d.last_name}{d.specialization ? ` (${d.specialization})` : ""}</option>
                     ))}
@@ -175,7 +178,7 @@ export default function VisitsPage() {
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Visit Type *</label>
+                  <label className="mb-1 block text-sm font-medium">{tr("visitType")} *</label>
                   <select className="input" value={form.visit_type} onChange={(e) => setForm({ ...form, visit_type: e.target.value })}>
                     {VISIT_TYPES.map((t) => (
                       <option key={t} value={t}>{t.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</option>
@@ -183,22 +186,22 @@ export default function VisitsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Visit Date/Time *</label>
+                  <label className="mb-1 block text-sm font-medium">{tr("visitDateTime")} *</label>
                   <input className="input" type="datetime-local" value={form.visit_date} onChange={(e) => setForm({ ...form, visit_date: e.target.value })} required />
                 </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">Chief Complaint</label>
-                <textarea className="input min-h-[80px]" value={form.chief_complaint} onChange={(e) => setForm({ ...form, chief_complaint: e.target.value })} placeholder="Describe the main reason for this visit..." />
+                <label className="mb-1 block text-sm font-medium">{tr("chiefComplaint")}</label>
+                <textarea className="input min-h-[80px]" value={form.chief_complaint} onChange={(e) => setForm({ ...form, chief_complaint: e.target.value })} placeholder={tr("chiefComplaintPlaceholder")} />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium">Doctor Notes</label>
-                <textarea className="input min-h-[80px]" value={form.doctor_notes} onChange={(e) => setForm({ ...form, doctor_notes: e.target.value })} placeholder="Additional clinical notes..." />
+                <label className="mb-1 block text-sm font-medium">{tr("doctorNotes")}</label>
+                <textarea className="input min-h-[80px]" value={form.doctor_notes} onChange={(e) => setForm({ ...form, doctor_notes: e.target.value })} placeholder={tr("doctorNotesPlaceholder")} />
               </div>
               {createError ? <p className="text-sm text-danger">{createError}</p> : null}
               <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-md border border-border px-4 py-2 text-sm" onClick={() => setShowCreate(false)}>Cancel</button>
-                <button className="btn-primary" type="submit" disabled={creating}>{creating ? "Creating..." : "Create Visit"}</button>
+                <button type="button" className="rounded-md border border-border px-4 py-2 text-sm" onClick={() => setShowCreate(false)}>{tr("cancel")}</button>
+                <button className="btn-primary" type="submit" disabled={creating}>{creating ? tr("creating") : tr("createVisit")}</button>
               </div>
             </form>
           </div>
@@ -210,11 +213,11 @@ export default function VisitsPage() {
         <table className="w-full min-w-[900px] text-sm">
           <thead className="table-header">
             <tr>
-              <th className="px-4 py-3 text-left">Date</th>
-              <th className="px-4 py-3 text-left">Type</th>
-              <th className="px-4 py-3 text-left">Chief Complaint</th>
-              <th className="px-4 py-3 text-left">Patient ID</th>
-              <th className="px-4 py-3 text-left">Doctor ID</th>
+              <th className="px-4 py-3 text-left">{tr("date")}</th>
+              <th className="px-4 py-3 text-left">{tr("type")}</th>
+              <th className="px-4 py-3 text-left">{tr("chiefComplaint")}</th>
+              <th className="px-4 py-3 text-left">{tr("patientId")}</th>
+              <th className="px-4 py-3 text-left">{tr("doctorId")}</th>
             </tr>
           </thead>
           <tbody>
@@ -237,7 +240,7 @@ export default function VisitsPage() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted">No visits found</td>
+                <td colSpan={5} className="px-4 py-8 text-center text-muted">{tr("noVisitsFound")}</td>
               </tr>
             )}
           </tbody>

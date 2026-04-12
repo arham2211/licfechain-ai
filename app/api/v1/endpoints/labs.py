@@ -26,7 +26,7 @@ from app.core.test_reference_ranges import (
     get_reference_range,
     get_all_supported_tests
 )
-from app.api.v1.dependencies import get_translation_language, apply_translation
+from app.api.v1.dependencies import get_translation_language, apply_translation, require_roles
 
 router = APIRouter()
 
@@ -34,6 +34,7 @@ router = APIRouter()
 @router.post("/", response_model=LabSchema)
 async def create_lab(
     lab: LabCreate,
+    _user=Depends(require_roles("admin", "lab")),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new lab"""

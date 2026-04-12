@@ -18,11 +18,13 @@ import os
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-# Set Google API key
-os.environ["GOOGLE_API_KEY"] = "AIzaSyBobKyNa1bY_Zn7sggPgrE24SYbZ_oK2Aw"
+# Read Google API key from environment (do not hardcode secrets in source)
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    raise RuntimeError("GOOGLE_API_KEY is not set. Export it in your shell or .env before running this script.")
 
 # Initialize Gemini model
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=GOOGLE_API_KEY)
 
 # Initialize Faker for realistic data
 fake = Faker()

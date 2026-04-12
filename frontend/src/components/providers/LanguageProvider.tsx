@@ -8,6 +8,7 @@ type LanguageContextType = {
   draftLanguage: AppLanguage;
   setDraftLanguage: (lang: AppLanguage) => void;
   applyLanguage: () => void;
+  changeLanguage: (lang: AppLanguage) => void;
   tr: (key: string) => string;
 };
 
@@ -28,6 +29,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       applyLanguage: () => {
         setLanguage(draftLanguage);
         setLang(draftLanguage);
+      },
+      changeLanguage: (lang: AppLanguage) => {
+        setLanguage(lang);
+        setDraftLanguage(lang);
+        setLang(lang);
       },
       tr: (key: string) => t(language, key),
     }),

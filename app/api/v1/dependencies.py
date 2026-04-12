@@ -17,7 +17,7 @@ from app.services.translation import translate_response
 async def get_translation_language(
     lang: Optional[str] = Query(
         "en",
-        description="Language code for translation (en=English, ur=Urdu, ar=Arabic, hi=Hindi, bn=Bengali)"
+        description="Language code for translation (en=English, ur=Urdu, fr=French, de=German)"
     )
 ) -> str:
     """
@@ -29,7 +29,7 @@ async def get_translation_language(
     Returns:
         Language code
     """
-    valid_languages = ["en", "ur", "ar", "hi", "bn"]
+    valid_languages = ["en", "ur", "fr", "de"]
     if lang not in valid_languages:
         return "en"  # Default to English if invalid
     return lang
@@ -106,4 +106,3 @@ def require_roles(*required_roles: str):
         return user
 
     return _checker
-

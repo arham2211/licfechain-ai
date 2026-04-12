@@ -39,9 +39,8 @@ export default function TranslationPage() {
           <select className="input" value={lang} onChange={(e) => setLang(e.target.value)}>
             <option value="en">English (en)</option>
             <option value="ur">Urdu (ur)</option>
-            <option value="ar">Arabic (ar)</option>
-            <option value="hi">Hindi (hi)</option>
-            <option value="bn">Bengali (bn)</option>
+            <option value="fr">French (fr)</option>
+            <option value="de">German (de)</option>
           </select>
           <button className="btn-primary flex items-center gap-2"><Languages size={16} /> Preview Translation</button>
         </form>
