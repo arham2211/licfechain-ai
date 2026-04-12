@@ -2,7 +2,7 @@
 Lab CRUD API endpoints
 """
 
-from typing import List, Optional
+from typing import List, Optional, Any
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
@@ -29,6 +29,37 @@ from app.core.test_reference_ranges import (
 from app.api.v1.dependencies import get_translation_language, apply_translation, require_roles
 
 router = APIRouter()
+
+
+@router.get("/patient-visits")
+async def get_patient_visits_for_lab(
+    patient_id: UUID = Query(..., description="Patient ID to fetch visits for"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    _user=Depends(require_roles("admin", "doctor", "lab")),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get visits for a patient for lab-report linking (lab role allowed)."""
+    try:
+        result = await db.execute(
+            select(DoctorVisit)
+            .where(DoctorVisit.patient_id == patient_id)
+            .order_by(DoctorVisit.visit_date.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        visits = result.scalars().all()
+        return [
+            {
+                "visit_id": str(v.visit_id),
+                "visit_date": v.visit_date.isoformat() if v.visit_date else None,
+                "visit_type": v.visit_type.value if hasattr(v.visit_type, "value") else str(v.visit_type),
+                "chief_complaint": v.chief_complaint,
+            }
+            for v in visits
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch patient visits: {str(e)}")
 
 # Lab endpoints
 @router.post("/", response_model=LabSchema)
@@ -106,8 +137,11 @@ async def create_lab_report(
             visit_result = await db.execute(
                 select(DoctorVisit).where(DoctorVisit.visit_id == report.visit_id)
             )
-            if not visit_result.scalar_one_or_none():
+            visit = visit_result.scalar_one_or_none()
+            if not visit:
                 raise HTTPException(status_code=404, detail="Visit not found")
+            if visit.patient_id != report.patient_id:
+                raise HTTPException(status_code=400, detail="Selected visit does not belong to the selected patient")
         
         # Create report
         report_data = report.dict()

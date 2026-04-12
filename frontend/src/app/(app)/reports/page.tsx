@@ -283,7 +283,7 @@ export default function ReportsPage() {
             )}
           </div>
 
-          {getUser()?.roles.includes("doctor") && getUser()?.patient_id && (
+          {false && getUser()?.roles.includes("doctor") && getUser()?.patient_id && (
             <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 shrink-0">
               <button
                 onClick={() => setLocalViewMode("clinical")}

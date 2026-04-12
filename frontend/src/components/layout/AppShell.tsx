@@ -63,14 +63,40 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const isPatientRole = primaryRole === "patient" || (viewMode === "personal" && hasPatientId);
 
-  const visibleNavItems = navItems.filter((item) =>
-    userRoles.some((role) => item.roles.includes(role))
-  );
+  const visibleNavItems = (() => {
+    // Doctor with dual mode gets two distinct sidebars:
+    // - Clinical: doctor menu but without Doctors/Labs
+    // - Personal: patient-style menu
+    if (showDualToggle) {
+      if (viewMode === "personal") {
+        const ownPatientId = user?.patient_id;
+        return navItems
+          .filter((item) => item.roles.includes("patient"))
+          .map((item) =>
+            item.href === "/patients" && ownPatientId
+              ? { ...item, href: `/patients/${ownPatientId}` }
+              : item
+          );
+      }
+      return navItems.filter(
+        (item) =>
+          item.roles.includes("doctor") &&
+          item.href !== "/doctors" &&
+          item.href !== "/labs"
+      );
+    }
+    return navItems.filter((item) =>
+      userRoles.some((role) => item.roles.includes(role))
+    );
+  })();
 
 
   async function handleLogout() {
-    await logout();
-    router.push("/sign-in");
+    try {
+      await logout();
+    } finally {
+      router.push("/sign-in");
+    }
   }
 
   function handleLanguageChange(nextLanguage: AppLanguage) {
@@ -124,7 +150,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div className="h-5 w-px bg-border/50" />
 
-            {showDualToggle && (
+            {false && showDualToggle && (
               <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 mr-4">
                 <button
                   onClick={() => setViewMode("clinical")}

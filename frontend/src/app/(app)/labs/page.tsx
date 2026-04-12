@@ -13,6 +13,7 @@ import { useLanguage } from "@/components/providers/LanguageProvider";
 type Lab = { lab_id: string; lab_name: string; lab_location?: string; accreditation_number?: string; phone?: string; email?: string };
 type Report = { report_id: string; report_type: string; status: string; report_date: string; patient_id: string; lab_id: string; test_name?: string; performed_by?: string };
 type PatientOption = { patient_id: string; first_name: string; last_name: string; cnic: string };
+type VisitOption = { visit_id: string; visit_date: string; visit_type: string; chief_complaint?: string | null };
 type TestResult = { result_id: string; test_name: string; test_value: number; unit?: string; reference_range_min?: number; reference_range_max?: number; is_abnormal?: boolean };
 type OralCancerDetectionResponse = {
   screening_id: string;
@@ -89,7 +90,10 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [labQuery, setLabQuery] = useState("");
   const [showPatientOptions, setShowPatientOptions] = useState(false);
   const [showLabOptions, setShowLabOptions] = useState(false);
-  const [reportForm, setReportForm] = useState({ patient_id: "", lab_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
+  const [reportForm, setReportForm] = useState({ patient_id: "", lab_id: "", visit_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
+  const [patientVisits, setPatientVisits] = useState<VisitOption[]>([]);
+  const [patientVisitsLoading, setPatientVisitsLoading] = useState(false);
+  const [patientVisitsError, setPatientVisitsError] = useState<string | null>(null);
   const [creatingReport, setCreatingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [showOralScan, setShowOralScan] = useState(false);
@@ -208,7 +212,9 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
     setShowCreateReport(true);
     setPatientQuery("");
     setLabQuery("");
-    setReportForm((prev) => ({ ...prev, patient_id: "", lab_id: "" }));
+    setReportForm((prev) => ({ ...prev, patient_id: "", lab_id: "", visit_id: "" }));
+    setPatientVisits([]);
+    setPatientVisitsError(null);
   }
 
   async function loadPatientsForSelection(searchQuery = "") {
@@ -253,6 +259,37 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   }, [showCreateReport, patientQuery]);
 
   useEffect(() => {
+    if (!showCreateReport || !reportForm.patient_id) {
+      setPatientVisits([]);
+      setPatientVisitsError(null);
+      return;
+    }
+    let cancelled = false;
+    const loadVisits = async () => {
+      setPatientVisitsLoading(true);
+      setPatientVisitsError(null);
+      try {
+        const visits = await api.request<VisitOption[]>(
+          `/labs/patient-visits?patient_id=${encodeURIComponent(reportForm.patient_id)}&skip=0&limit=100`
+        );
+        if (cancelled) return;
+        setPatientVisits(visits);
+      } catch (e) {
+        if (cancelled) return;
+        setPatientVisits([]);
+        setPatientVisitsError(e instanceof Error ? e.message : tr("failed"));
+      } finally {
+        if (cancelled) return;
+        setPatientVisitsLoading(false);
+      }
+    };
+    loadVisits();
+    return () => {
+      cancelled = true;
+    };
+  }, [showCreateReport, reportForm.patient_id, language, tr]);
+
+  useEffect(() => {
     if (!showOralScan) return;
     const timer = setTimeout(() => {
       loadPatientsForSelection(oralPatientQuery);
@@ -271,10 +308,11 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       await api.request("/labs/reports/", {
         method: "POST", body: JSON.stringify({
           ...reportForm, report_date: new Date(reportForm.report_date).toISOString(),
-          test_name: reportForm.test_name || null, pdf_url: null, visit_id: null,
+          test_name: reportForm.test_name || null, pdf_url: null, visit_id: reportForm.visit_id || null,
         })
       });
-      setShowCreateReport(false); setReportForm({ patient_id: "", lab_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
+      setShowCreateReport(false); setReportForm({ patient_id: "", lab_id: "", visit_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
+      setPatientVisits([]);
       setSuccessMsg(tr("reportCreated")); setTimeout(() => setSuccessMsg(null), 3000); await loadAll();
     } catch (e) { setReportError(e instanceof Error ? e.message : tr("failedToCreateReport")); } finally { setCreatingReport(false); }
   }
@@ -432,7 +470,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
               </div>
             )}
 
-            {user?.roles.includes("doctor") && user?.patient_id && (
+            {false && user?.roles.includes("doctor") && user?.patient_id && (
               <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1">
                 <button
                   onClick={() => setLocalViewMode("clinical")}
@@ -497,7 +535,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                       value={patientQuery}
                       onChange={(e) => {
                         setPatientQuery(e.target.value);
-                        setReportForm((prev) => ({ ...prev, patient_id: "" }));
+                        setReportForm((prev) => ({ ...prev, patient_id: "", visit_id: "" }));
                         setShowPatientOptions(true);
                       }}
                       onFocus={() => setShowPatientOptions(true)}
@@ -514,7 +552,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                             className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
                             onMouseDown={(e) => {
                               e.preventDefault();
-                              setReportForm((prev) => ({ ...prev, patient_id: p.patient_id }));
+                              setReportForm((prev) => ({ ...prev, patient_id: p.patient_id, visit_id: "" }));
                               setPatientQuery(`${p.first_name} ${p.last_name} (${p.cnic})`);
                               setShowPatientOptions(false);
                             }}
@@ -593,6 +631,23 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Linked Visit (Optional)</label>
+                  <select
+                    className="input w-full"
+                    value={reportForm.visit_id}
+                    onChange={(e) => setReportForm({ ...reportForm, visit_id: e.target.value })}
+                    disabled={!reportForm.patient_id || patientVisitsLoading}
+                  >
+                    <option value="">{patientVisitsLoading ? tr("loading") : "No linked visit"}</option>
+                    {patientVisits.map((v) => (
+                      <option key={v.visit_id} value={v.visit_id}>
+                        {new Date(v.visit_date).toLocaleDateString()} - {v.visit_type.replace(/_/g, " ")}{v.chief_complaint ? ` - ${v.chief_complaint}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {patientVisitsError && <p className="mt-1 text-xs text-danger">{patientVisitsError}</p>}
+                </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">{tr("date")} *</label>
                   <input
