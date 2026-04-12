@@ -118,6 +118,9 @@ class ProgressionReportService:
             'critical': 9.0,
             'end stage': 10.0,
             'cured': 0.0,
+            'low risk': 2.0,
+            'moderate risk': 6.0,
+            'high risk': 9.0,
         }
         
         # Check CKD-specific scores first
@@ -172,6 +175,10 @@ class ProgressionReportService:
             'parathyroid_disorder': '%parathyroid%',
             'hyperparathyroidism': '%parathyroid%',
             'hypoparathyroidism': '%parathyroid%',
+            'oral_cancer': '%oral%cancer%',
+            'oral cancer': '%oral%cancer%',
+            'oral lesion': '%oral%',
+            'mouth cancer': '%oral%cancer%',
         }
         
         # Check if we have a specific pattern for this disease

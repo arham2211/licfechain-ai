@@ -98,7 +98,7 @@ function stageToSeverity(stage: string): number {
   return 50;
 }
 
-const DISEASES = ["diabetes", "anemia", "ckd", "parathyroid"];
+const DISEASES = ["diabetes", "anemia", "ckd", "parathyroid", "oral_cancer"];
 
 const stagger = {
   hidden: {},

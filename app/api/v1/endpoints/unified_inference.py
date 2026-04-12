@@ -197,6 +197,8 @@ async def auto_create_diagnosis(
         model_name = 'xgb_ckd_v1'
     elif 'parathyroid' in disease_lower:
         model_name = 'rule_based_parathyroid_v1'
+    elif 'oral' in disease_lower and 'cancer' in disease_lower:
+        model_name = 'roboflow_oral_cancer_v1'
     
     # Get diagnosis result
     diagnosis_result = prediction_result.get('diagnosis', 'Unknown')
@@ -821,4 +823,3 @@ async def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
-

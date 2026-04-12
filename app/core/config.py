@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Translation - Groq API (must be set in .env file)
     GROQ_API_KEY: str
 
+    # Roboflow Oral Cancer model
+    ROBOFLOW_API_KEY: str = ""
+    ROBOFLOW_ORAL_MODEL_ID: str = "oral-cancer-up2pr"
+    ROBOFLOW_ORAL_MODEL_VERSION: str = "1"
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -39,5 +44,4 @@ def get_settings() -> Settings:
 def clear_settings_cache():
     """Clear the settings cache - useful when .env file changes"""
     get_settings.cache_clear()
-
 

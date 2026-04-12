@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { FlaskConical, Plus, X, Trash2, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { FlaskConical, Plus, X, Trash2, CheckCircle, AlertTriangle, Loader2, ImagePlus } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
@@ -14,6 +14,17 @@ type Lab = { lab_id: string; lab_name: string; lab_location?: string; accreditat
 type Report = { report_id: string; report_type: string; status: string; report_date: string; patient_id: string; lab_id: string; test_name?: string; performed_by?: string };
 type PatientOption = { patient_id: string; first_name: string; last_name: string; cnic: string };
 type TestResult = { result_id: string; test_name: string; test_value: number; unit?: string; reference_range_min?: number; reference_range_max?: number; is_abnormal?: boolean };
+type OralCancerDetectionResponse = {
+  screening_id: string;
+  patient_id: string;
+  report_id?: string | null;
+  visit_id?: string | null;
+  diagnosis_id?: string | null;
+  progression_id?: string | null;
+  diagnosis_label: string;
+  progression_stage: string;
+  confidence_score: number;
+};
 
 type LabsPageContentProps = {
   forcedSection?: "labs" | "reports";
@@ -30,9 +41,10 @@ const REPORT_TYPE_OPTIONS = [
   "kidney_panel",
   "thyroid_panel",
   "parathyroid_panel",
+  "oral_cancer_screening",
   "comprehensive_panel",
 ];
-const REPORT_PATIENT_OPTIONS_LIMIT = 100;
+const REPORT_PATIENT_OPTIONS_LIMIT = 20;
 
 export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const { tr, language } = useLanguage();
@@ -52,6 +64,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [isPatient, setIsPatient] = useState(initialIsPatient);
   const [authReady, setAuthReady] = useState(false);
   const loadAllRequestId = useRef(0);
+  const patientSearchRequestId = useRef(0);
 
   const canCreateLab = userRoles.some((r) => ["admin", "lab"].includes(r));
   const canCreateReport = userRoles.some((r) => ["admin", "lab", "doctor"].includes(r));
@@ -79,6 +92,24 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [reportForm, setReportForm] = useState({ patient_id: "", lab_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
   const [creatingReport, setCreatingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [showOralScan, setShowOralScan] = useState(false);
+  const [oralPatientQuery, setOralPatientQuery] = useState("");
+  const [oralLabQuery, setOralLabQuery] = useState("");
+  const [showOralPatientOptions, setShowOralPatientOptions] = useState(false);
+  const [showOralLabOptions, setShowOralLabOptions] = useState(false);
+  const [detectingOralCancer, setDetectingOralCancer] = useState(false);
+  const [oralScanError, setOralScanError] = useState<string | null>(null);
+  const [oralScanForm, setOralScanForm] = useState<{
+    patient_id: string;
+    lab_id: string;
+    image: File | null;
+    auto_save: boolean;
+  }>({
+    patient_id: "",
+    lab_id: "",
+    image: null,
+    auto_save: true,
+  });
 
   // View Report Modal
   const [viewingReport, setViewingReport] = useState<Report | null>(null);
@@ -173,23 +204,61 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
     } catch (e) { setLabError(e instanceof Error ? e.message : tr("failedToCreateLab")); } finally { setCreatingLab(false); }
   }
 
-  async function openCreateReport() {
+  function openCreateReport() {
     setShowCreateReport(true);
     setPatientQuery("");
     setLabQuery("");
     setReportForm((prev) => ({ ...prev, patient_id: "", lab_id: "" }));
+  }
+
+  async function loadPatientsForSelection(searchQuery = "") {
+    const requestId = ++patientSearchRequestId.current;
     setPatientsLoading(true);
     setPatientsError(null);
     try {
-      const p = await api.request<PatientOption[]>(`/patients/?skip=0&limit=${REPORT_PATIENT_OPTIONS_LIMIT}`);
+      const q = searchQuery.trim();
+      const searchPart = q ? `&search=${encodeURIComponent(q)}` : "";
+      const p = await api.request<PatientOption[]>(`/patients/?skip=0&limit=${REPORT_PATIENT_OPTIONS_LIMIT}${searchPart}`);
+      if (requestId !== patientSearchRequestId.current) return;
       setPatients(p);
     } catch (e) {
+      if (requestId !== patientSearchRequestId.current) return;
       setPatients([]);
       setPatientsError(e instanceof Error ? e.message : tr("failed"));
     } finally {
+      if (requestId !== patientSearchRequestId.current) return;
       setPatientsLoading(false);
     }
   }
+
+  function openOralScanModal() {
+    setShowOralScan(true);
+    setOralScanError(null);
+    setOralPatientQuery("");
+    setOralLabQuery("");
+    setOralScanForm({
+      patient_id: "",
+      lab_id: "",
+      image: null,
+      auto_save: true,
+    });
+  }
+
+  useEffect(() => {
+    if (!showCreateReport) return;
+    const timer = setTimeout(() => {
+      loadPatientsForSelection(patientQuery);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [showCreateReport, patientQuery]);
+
+  useEffect(() => {
+    if (!showOralScan) return;
+    const timer = setTimeout(() => {
+      loadPatientsForSelection(oralPatientQuery);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [showOralScan, oralPatientQuery]);
 
   async function handleCreateReport(e: FormEvent) {
     e.preventDefault(); setReportError(null); setCreatingReport(true);
@@ -230,6 +299,56 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const filteredReports = reports.filter((r) =>
     reportStatusFilter === "all" ? true : r.status === reportStatusFilter
   );
+  const filteredOralPatients = patients
+    .filter((p) => {
+      const q = oralPatientQuery.trim().toLowerCase();
+      if (!q) return true;
+      const full = `${p.first_name} ${p.last_name}`.toLowerCase();
+      return full.includes(q) || p.cnic.toLowerCase().includes(q);
+    })
+    .slice(0, 20);
+  const filteredOralLabs = labs
+    .filter((l) => {
+      const q = oralLabQuery.trim().toLowerCase();
+      if (!q) return true;
+      return l.lab_name.toLowerCase().includes(q) || (l.lab_location ?? "").toLowerCase().includes(q);
+    })
+    .slice(0, 20);
+
+  async function handleRunOralScan(e: FormEvent) {
+    e.preventDefault();
+    setOralScanError(null);
+
+    if (!oralScanForm.patient_id || !oralScanForm.lab_id || !oralScanForm.image) {
+      setOralScanError("Please select patient, lab, and oral image.");
+      return;
+    }
+
+    setDetectingOralCancer(true);
+    try {
+      const formData = new FormData();
+      formData.append("patient_id", oralScanForm.patient_id);
+      formData.append("lab_id", oralScanForm.lab_id);
+      formData.append("image", oralScanForm.image);
+      formData.append("auto_save", oralScanForm.auto_save ? "true" : "false");
+
+      const response = await api.request<OralCancerDetectionResponse>("/ml/oral-cancer/detect", {
+        method: "POST",
+        body: formData,
+      });
+
+      setShowOralScan(false);
+      setSuccessMsg(
+        `Oral scan completed: ${response.diagnosis_label} (${Math.round((response.confidence_score ?? 0) * 100)}%)`
+      );
+      setTimeout(() => setSuccessMsg(null), 4000);
+      await loadAll();
+    } catch (e) {
+      setOralScanError(e instanceof Error ? e.message : tr("failed"));
+    } finally {
+      setDetectingOralCancer(false);
+    }
+  }
 
   async function selectReport(report: Report) {
     setViewingReport(report);
@@ -305,6 +424,11 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                 <PatientSearch onSelect={setPatientId} className="w-64" />
                 {showLabsSection && canCreateLab && <button className="btn-primary text-sm whitespace-nowrap" onClick={() => setShowCreateLab(true)}><Plus size={16} /> {tr("newLab")}</button>}
                 {showReportsSection && canCreateReport && <button className="btn-primary text-sm whitespace-nowrap" onClick={openCreateReport}><Plus size={16} /> {tr("newReport")}</button>}
+                {showReportsSection && canCreateReport && (
+                  <button className="btn-primary text-sm whitespace-nowrap" onClick={openOralScanModal}>
+                    <ImagePlus size={16} /> Oral Scan
+                  </button>
+                )}
               </div>
             )}
 
@@ -512,6 +636,137 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
         </div>
       )}
 
+      {/* Oral Cancer Scan Modal */}
+      {showOralScan && (
+        <div className="modal-overlay">
+          <div className="card w-full max-w-2xl overflow-hidden p-0">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h2 className="text-lg font-semibold">Oral Cancer Detection</h2>
+              <button className="btn-ghost text-sm" onClick={() => setShowOralScan(false)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <form className="max-h-[80vh] space-y-5 overflow-y-auto p-6" onSubmit={handleRunOralScan}>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">{tr("patient")} *</label>
+                  <div className="relative">
+                    <input
+                      className="input w-full"
+                      value={oralPatientQuery}
+                      onChange={(e) => {
+                        setOralPatientQuery(e.target.value);
+                        setOralScanForm((prev) => ({ ...prev, patient_id: "" }));
+                        setShowOralPatientOptions(true);
+                      }}
+                      onFocus={() => setShowOralPatientOptions(true)}
+                      onBlur={() => setTimeout(() => setShowOralPatientOptions(false), 120)}
+                      placeholder={patientsLoading ? tr("loading") : "Type patient name or CNIC"}
+                      disabled={patientsLoading}
+                    />
+                    {showOralPatientOptions && !patientsLoading && (
+                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
+                        {filteredOralPatients.length > 0 ? filteredOralPatients.map((p) => (
+                          <button
+                            key={p.patient_id}
+                            type="button"
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setOralScanForm((prev) => ({ ...prev, patient_id: p.patient_id }));
+                              setOralPatientQuery(`${p.first_name} ${p.last_name} (${p.cnic})`);
+                              setShowOralPatientOptions(false);
+                            }}
+                          >
+                            {p.first_name} {p.last_name} ({p.cnic})
+                          </button>
+                        )) : <div className="px-3 py-2 text-xs text-slate-400">No matching patients</div>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">{tr("lab")} *</label>
+                  <div className="relative">
+                    <input
+                      className="input w-full"
+                      value={oralLabQuery}
+                      onChange={(e) => {
+                        setOralLabQuery(e.target.value);
+                        setOralScanForm((prev) => ({ ...prev, lab_id: "" }));
+                        setShowOralLabOptions(true);
+                      }}
+                      onFocus={() => setShowOralLabOptions(true)}
+                      onBlur={() => setTimeout(() => setShowOralLabOptions(false), 120)}
+                      placeholder="Type lab name"
+                    />
+                    {showOralLabOptions && (
+                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
+                        {filteredOralLabs.length > 0 ? filteredOralLabs.map((l) => (
+                          <button
+                            key={l.lab_id}
+                            type="button"
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setOralScanForm((prev) => ({ ...prev, lab_id: l.lab_id }));
+                              setOralLabQuery(l.lab_name);
+                              setShowOralLabOptions(false);
+                            }}
+                          >
+                            {l.lab_name}
+                          </button>
+                        )) : <div className="px-3 py-2 text-xs text-slate-400">No matching labs</div>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">Oral Image *</label>
+                <input
+                  className="input w-full"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setOralScanForm((prev) => ({ ...prev, image: file }));
+                  }}
+                  required
+                />
+                <p className="mt-1 text-xs text-muted">Supported: JPG, PNG, WEBP</p>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={oralScanForm.auto_save}
+                  onChange={(e) => setOralScanForm((prev) => ({ ...prev, auto_save: e.target.checked }))}
+                />
+                Auto-create diagnosis and disease progression entries
+              </label>
+
+              {oralScanError && <p className="text-sm text-danger">{oralScanError}</p>}
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <button type="button" className="btn-ghost text-sm" onClick={() => setShowOralScan(false)}>
+                  {tr("cancel")}
+                </button>
+                <button className="btn-primary" disabled={detectingOralCancer}>
+                  {detectingOralCancer ? (
+                    <span className="inline-flex items-center gap-2"><Loader2 size={15} className="animate-spin" /> Running Model...</span>
+                  ) : (
+                    "Run Oral Scan"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Patient view or Clinical view with focused patient: Just their reports */}
       {isPatient || patientId ? (
         <div className="card p-0 overflow-x-auto overflow-visible relative">
@@ -604,7 +859,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
               <tbody>
                 {filteredReports.map((r) => (
                   <tr key={r.report_id} className={`table-row cursor-pointer transition ${viewingReport?.report_id === r.report_id ? "bg-primary/5" : "hover:bg-primary/5"}`} onClick={() => selectReport(r)}>
-                    <td className="px-4 py-3">{r.report_type}</td>
+                    <td className="px-4 py-3 capitalize">{r.report_type.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3"><span className={`badge ${r.status === "completed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{tr(r.status)}</span></td>
                     <td className="px-4 py-3">{String(r.report_date).slice(0, 10)}</td>
                     <td className="px-4 py-3">

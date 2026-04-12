@@ -80,7 +80,9 @@ class Patient(Base):
     ml_predictions = relationship(
         "MLPrediction", back_populates="patient", cascade="all, delete-orphan"
     )
+    oral_cancer_screenings = relationship(
+        "OralCancerScreening", back_populates="patient", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Patient(cnic={self.cnic}, name={self.first_name} {self.last_name})>"
-

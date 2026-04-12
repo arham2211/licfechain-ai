@@ -30,6 +30,9 @@ class Lab(Base):
     lab_reports = relationship(
         "LabReport", back_populates="lab", cascade="all, delete-orphan"
     )
+    oral_cancer_screenings = relationship(
+        "OralCancerScreening", back_populates="lab"
+    )
 
     def __repr__(self) -> str:
         return f"<Lab(name={self.lab_name}, location={self.lab_location})>"
@@ -71,6 +74,9 @@ class LabReport(Base):
     test_results = relationship(
         "LabTestResult", back_populates="report", cascade="all, delete-orphan"
     )
+    oral_cancer_screenings = relationship(
+        "OralCancerScreening", back_populates="report"
+    )
 
     def __repr__(self) -> str:
         return f"<LabReport(report_id={self.report_id}, patient_id={self.patient_id}, type={self.report_type})>"
@@ -98,4 +104,3 @@ class LabTestResult(Base):
 
     def __repr__(self) -> str:
         return f"<LabTestResult(test={self.test_name}, value={self.test_value} {self.unit})>"
-

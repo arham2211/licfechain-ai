@@ -61,6 +61,9 @@ class DoctorVisit(Base):
     lab_reports = relationship(
         "LabReport", back_populates="visit"
     )
+    oral_cancer_screenings = relationship(
+        "OralCancerScreening", back_populates="visit"
+    )
 
     def __repr__(self) -> str:
         return f"<DoctorVisit(visit_id={self.visit_id}, patient_id={self.patient_id}, date={self.visit_date})>"
@@ -136,4 +139,3 @@ class Prescription(Base):
 
     def __repr__(self) -> str:
         return f"<Prescription(medication={self.medication_name}, dosage={self.dosage})>"
-

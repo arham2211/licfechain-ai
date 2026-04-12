@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1.endpoints import (
     auth, health, patients, doctors, visits, labs,
     proposal_placeholders,
-    unified_inference, progression_report, translation
+    unified_inference, progression_report, translation, oral_cancer
 )
 from app.api.v1.dependencies import get_current_user, require_roles
 
@@ -55,6 +55,14 @@ api_router.include_router(
     dependencies=[Depends(get_current_user), Depends(require_roles("admin", "doctor", "patient"))],
 )
 
+# Oral cancer image-based detection
+api_router.include_router(
+    oral_cancer.router,
+    prefix="/ml/oral-cancer",
+    tags=["oral-cancer"],
+    dependencies=[Depends(get_current_user), Depends(require_roles("admin", "doctor", "lab"))],
+)
+
 # Progression Reports
 api_router.include_router(
     progression_report.router,
@@ -78,4 +86,3 @@ api_router.include_router(
     tags=["translation"],
     dependencies=[Depends(get_current_user), Depends(require_roles("admin", "doctor", "patient", "lab"))],
 )
-

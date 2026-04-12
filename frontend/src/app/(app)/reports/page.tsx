@@ -250,6 +250,7 @@ export default function ReportsPage() {
                     <option value="anemia">{tr("anemia")}</option>
                     <option value="ckd">{tr("ckd")}</option>
                     <option value="parathyroid">{tr("parathyroid")}</option>
+                    <option value="oral_cancer">Oral Cancer</option>
                   </select>
                 </div>
                 <button
@@ -276,6 +277,7 @@ export default function ReportsPage() {
                   <option value="anemia">{tr("anemia")}</option>
                   <option value="ckd">{tr("ckd")}</option>
                   <option value="parathyroid">{tr("parathyroid")}</option>
+                    <option value="oral_cancer">Oral Cancer</option>
                 </select>
               </div>
             )}
