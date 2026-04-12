@@ -32,6 +32,7 @@ const REPORT_TYPE_OPTIONS = [
   "parathyroid_panel",
   "comprehensive_panel",
 ];
+const REPORT_PATIENT_OPTIONS_LIMIT = 100;
 
 export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const { tr, language } = useLanguage();
@@ -69,6 +70,12 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   // Create Report
   const [showCreateReport, setShowCreateReport] = useState(false);
   const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [patientsLoading, setPatientsLoading] = useState(false);
+  const [patientsError, setPatientsError] = useState<string | null>(null);
+  const [patientQuery, setPatientQuery] = useState("");
+  const [labQuery, setLabQuery] = useState("");
+  const [showPatientOptions, setShowPatientOptions] = useState(false);
+  const [showLabOptions, setShowLabOptions] = useState(false);
   const [reportForm, setReportForm] = useState({ patient_id: "", lab_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
   const [creatingReport, setCreatingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -83,6 +90,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [resultForm, setResultForm] = useState({ test_name: "", test_value: "", unit: "" });
   const [addingResult, setAddingResult] = useState(false);
   const [resultError, setResultError] = useState<string | null>(null);
+  const [reportStatusFilter, setReportStatusFilter] = useState<"all" | "pending" | "completed">("all");
 
   useEffect(() => {
     const u = getUser();
@@ -109,7 +117,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   useEffect(() => {
     if (!authReady) return;
     loadAll();
-  }, [authReady, patientId, localViewMode, language]);
+  }, [authReady, patientId, localViewMode, language, reportStatusFilter]);
 
   async function loadAll() {
     const requestId = ++loadAllRequestId.current;
@@ -134,11 +142,12 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       }
 
       const effectivePatientId = patientId || (isPatient ? (user?.patient_id || "") : "");
-      let reportsUrl = "/labs/reports?skip=0&limit=100";
+      const statusQuery = reportStatusFilter === "all" ? "" : `&status=${encodeURIComponent(reportStatusFilter)}`;
+      let reportsUrl = `/labs/reports?skip=0&limit=100${statusQuery}`;
       if (effectivePatientId) {
-        reportsUrl = `/labs/reports?patient_id=${effectivePatientId}&skip=0&limit=100`;
+        reportsUrl = `/labs/reports?patient_id=${effectivePatientId}&skip=0&limit=100${statusQuery}`;
       } else if (effectiveLabId) {
-        reportsUrl = `/labs/reports?lab_id=${effectiveLabId}&skip=0&limit=100`;
+        reportsUrl = `/labs/reports?lab_id=${effectiveLabId}&skip=0&limit=100${statusQuery}`;
       }
 
       const r = await api.request<Report[]>(reportsUrl);
@@ -166,11 +175,29 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
   async function openCreateReport() {
     setShowCreateReport(true);
-    try { const p = await api.request<PatientOption[]>("/patients/?skip=0&limit=500"); setPatients(p); } catch { }
+    setPatientQuery("");
+    setLabQuery("");
+    setReportForm((prev) => ({ ...prev, patient_id: "", lab_id: "" }));
+    setPatientsLoading(true);
+    setPatientsError(null);
+    try {
+      const p = await api.request<PatientOption[]>(`/patients/?skip=0&limit=${REPORT_PATIENT_OPTIONS_LIMIT}`);
+      setPatients(p);
+    } catch (e) {
+      setPatients([]);
+      setPatientsError(e instanceof Error ? e.message : tr("failed"));
+    } finally {
+      setPatientsLoading(false);
+    }
   }
 
   async function handleCreateReport(e: FormEvent) {
     e.preventDefault(); setReportError(null); setCreatingReport(true);
+    if (!reportForm.patient_id || !reportForm.lab_id) {
+      setReportError("Please select a patient and lab from the dropdown options.");
+      setCreatingReport(false);
+      return;
+    }
     try {
       await api.request("/labs/reports/", {
         method: "POST", body: JSON.stringify({
@@ -182,6 +209,27 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       setSuccessMsg(tr("reportCreated")); setTimeout(() => setSuccessMsg(null), 3000); await loadAll();
     } catch (e) { setReportError(e instanceof Error ? e.message : tr("failedToCreateReport")); } finally { setCreatingReport(false); }
   }
+
+  const filteredPatients = patients
+    .filter((p) => {
+      const q = patientQuery.trim().toLowerCase();
+      if (!q) return true;
+      const full = `${p.first_name} ${p.last_name}`.toLowerCase();
+      return full.includes(q) || p.cnic.toLowerCase().includes(q);
+    })
+    .slice(0, 20);
+
+  const filteredLabs = labs
+    .filter((l) => {
+      const q = labQuery.trim().toLowerCase();
+      if (!q) return true;
+      return l.lab_name.toLowerCase().includes(q) || (l.lab_location ?? "").toLowerCase().includes(q);
+    })
+    .slice(0, 20);
+
+  const filteredReports = reports.filter((r) =>
+    reportStatusFilter === "all" ? true : r.status === reportStatusFilter
+  );
 
   async function selectReport(report: Report) {
     setViewingReport(report);
@@ -225,6 +273,23 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       }
       await loadAll();
     } catch (e) { setError(e instanceof Error ? e.message : tr("failed")); }
+  }
+
+  async function handleMarkReportCompleted(reportId: string) {
+    try {
+      await api.request(`/labs/reports/${reportId}`, {
+        method: "PUT",
+        body: JSON.stringify({ status: "completed" }),
+      });
+      if (viewingReport?.report_id === reportId) {
+        setViewingReport({ ...viewingReport, status: "completed" });
+      }
+      setSuccessMsg("Report marked as completed");
+      setTimeout(() => setSuccessMsg(null), 3000);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : tr("failed"));
+    }
   }
 
   return (
@@ -302,35 +367,77 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium">{tr("patient")} *</label>
-                  <select
-                    className="input w-full"
-                    value={reportForm.patient_id}
-                    onChange={(e) => setReportForm({ ...reportForm, patient_id: e.target.value })}
-                    required
-                  >
-                    <option value="">{tr("selectOption")}</option>
-                    {patients.map((p) => (
-                      <option key={p.patient_id} value={p.patient_id}>
-                        {p.first_name} {p.last_name} ({p.cnic})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <input
+                      className="input w-full"
+                      value={patientQuery}
+                      onChange={(e) => {
+                        setPatientQuery(e.target.value);
+                        setReportForm((prev) => ({ ...prev, patient_id: "" }));
+                        setShowPatientOptions(true);
+                      }}
+                      onFocus={() => setShowPatientOptions(true)}
+                      onBlur={() => setTimeout(() => setShowPatientOptions(false), 120)}
+                      placeholder={patientsLoading ? tr("loading") : "Type patient name or CNIC"}
+                      disabled={patientsLoading}
+                    />
+                    {showPatientOptions && !patientsLoading && (
+                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
+                        {filteredPatients.length > 0 ? filteredPatients.map((p) => (
+                          <button
+                            key={p.patient_id}
+                            type="button"
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setReportForm((prev) => ({ ...prev, patient_id: p.patient_id }));
+                              setPatientQuery(`${p.first_name} ${p.last_name} (${p.cnic})`);
+                              setShowPatientOptions(false);
+                            }}
+                          >
+                            {p.first_name} {p.last_name} ({p.cnic})
+                          </button>
+                        )) : <div className="px-3 py-2 text-xs text-slate-400">No matching patients</div>}
+                      </div>
+                    )}
+                  </div>
+                  {patientsError && <p className="mt-1 text-xs text-danger">{patientsError}</p>}
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">{tr("lab")} *</label>
-                  <select
-                    className="input w-full"
-                    value={reportForm.lab_id}
-                    onChange={(e) => setReportForm({ ...reportForm, lab_id: e.target.value })}
-                    required
-                  >
-                    <option value="">{tr("selectOption")}</option>
-                    {labs.map((l) => (
-                      <option key={l.lab_id} value={l.lab_id}>
-                        {l.lab_name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <input
+                      className="input w-full"
+                      value={labQuery}
+                      onChange={(e) => {
+                        setLabQuery(e.target.value);
+                        setReportForm((prev) => ({ ...prev, lab_id: "" }));
+                        setShowLabOptions(true);
+                      }}
+                      onFocus={() => setShowLabOptions(true)}
+                      onBlur={() => setTimeout(() => setShowLabOptions(false), 120)}
+                      placeholder="Type lab name"
+                    />
+                    {showLabOptions && (
+                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
+                        {filteredLabs.length > 0 ? filteredLabs.map((l) => (
+                          <button
+                            key={l.lab_id}
+                            type="button"
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setReportForm((prev) => ({ ...prev, lab_id: l.lab_id }));
+                              setLabQuery(l.lab_name);
+                              setShowLabOptions(false);
+                            }}
+                          >
+                            {l.lab_name}
+                          </button>
+                        )) : <div className="px-3 py-2 text-xs text-slate-400">No matching labs</div>}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -408,13 +515,38 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       {/* Patient view or Clinical view with focused patient: Just their reports */}
       {isPatient || patientId ? (
         <div className="card p-0 overflow-x-auto overflow-visible relative">
-          <div className="border-b border-border px-5 py-3 font-semibold gradient-text">
-            {isPatient ? tr("myReports") : tr("patientReports")} ({reports.length})
+          <div className="flex flex-col gap-3 border-b border-border px-5 py-3 md:flex-row md:items-center md:justify-between">
+            <div className="font-semibold gradient-text">
+              {isPatient ? tr("myReports") : tr("patientReports")} ({filteredReports.length})
+            </div>
+            <div className="inline-flex items-center gap-1 rounded-full border border-border bg-slate-100/40 p-1">
+              <button
+                type="button"
+                onClick={() => setReportStatusFilter("all")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "all" ? "bg-white text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
+              >
+                Both
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportStatusFilter("pending")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "pending" ? "bg-warning/20 text-warning" : "text-muted hover:text-foreground"}`}
+              >
+                {tr("pending")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportStatusFilter("completed")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "completed" ? "bg-success/20 text-success" : "text-muted hover:text-foreground"}`}
+              >
+                {tr("completed")}
+              </button>
+            </div>
           </div>
           <table className="w-full min-w-[500px] text-sm">
             <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("type")}</th><th className="px-4 py-3 text-left">{tr("status")}</th><th className="px-4 py-3 text-left">{tr("date")}</th><th className="px-4 py-3 text-left">{tr("test")}</th></tr></thead>
             <tbody>
-              {reports.map((r) => (
+              {filteredReports.map((r) => (
                 <tr key={r.report_id} className={`table-row cursor-pointer transition ${viewingReport?.report_id === r.report_id ? "bg-primary/5" : "hover:bg-primary/5"}`} onClick={() => selectReport(r)}>
                   <td className="px-4 py-3 capitalize">{r.report_type.replace(/_/g, " ")}</td>
                   <td className="px-4 py-3"><span className={`badge ${r.status === "completed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{tr(r.status)}</span></td>
@@ -422,7 +554,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                   <td className="px-4 py-3">{r.test_name ?? "-"}</td>
                 </tr>
               ))}
-              {reports.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">{tr("noLabReportsFound")}</td></tr>}
+              {filteredReports.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">{tr("noLabReportsFound")}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -441,18 +573,60 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
             </table>
           </div>}
           {showReportsSection && <div className="card overflow-x-auto p-0">
-            <div className="border-b border-border px-4 py-3 font-semibold">{tr("reports")} ({reports.length})</div>
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div className="font-semibold">{tr("reports")} ({filteredReports.length})</div>
+              <div className="inline-flex items-center gap-1 rounded-full border border-border bg-slate-100/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => setReportStatusFilter("all")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "all" ? "bg-white text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
+                >
+                  Both
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportStatusFilter("pending")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "pending" ? "bg-warning/20 text-warning" : "text-muted hover:text-foreground"}`}
+                >
+                  {tr("pending")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportStatusFilter("completed")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "completed" ? "bg-success/20 text-success" : "text-muted hover:text-foreground"}`}
+                >
+                  {tr("completed")}
+                </button>
+              </div>
+            </div>
             <table className="w-full min-w-[400px] text-sm">
               <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("type")}</th><th className="px-4 py-3 text-left">{tr("status")}</th><th className="px-4 py-3 text-left">{tr("date")}</th><th className="px-4 py-3 text-left">{tr("actions")}</th></tr></thead>
               <tbody>
-                {reports.map((r) => (
+                {filteredReports.map((r) => (
                   <tr key={r.report_id} className={`table-row cursor-pointer transition ${viewingReport?.report_id === r.report_id ? "bg-primary/5" : "hover:bg-primary/5"}`} onClick={() => selectReport(r)}>
                     <td className="px-4 py-3">{r.report_type}</td>
                     <td className="px-4 py-3"><span className={`badge ${r.status === "completed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{tr(r.status)}</span></td>
                     <td className="px-4 py-3">{String(r.report_date).slice(0, 10)}</td>
-                    <td className="px-4 py-3"><button className="text-danger hover:text-danger/80 transition" onClick={(e) => { e.stopPropagation(); handleDeleteReport(r.report_id); }}><Trash2 size={14} /></button></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        {r.status === "pending" && (
+                          <button
+                            className="text-success hover:text-success/80 transition"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMarkReportCompleted(r.report_id);
+                            }}
+                            title="Mark Completed"
+                          >
+                            <CheckCircle size={16} />
+                          </button>
+                        )}
+                        <button className="text-danger hover:text-danger/80 transition" onClick={(e) => { e.stopPropagation(); handleDeleteReport(r.report_id); }} title={tr("delete")}><Trash2 size={14} /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
+                {filteredReports.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">{tr("noLabReportsFound")}</td></tr>}
               </tbody>
             </table>
           </div>}
@@ -543,15 +717,15 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                       <form className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end" onSubmit={handleAddResult}>
                         <div className="md:col-span-2">
                           <label className="block text-xs font-bold text-slate-500 mb-1">{tr("testName")} *</label>
-                          <input className="input" value={resultForm.test_name} onChange={(e) => setResultForm({ ...resultForm, test_name: e.target.value })} required placeholder={tr("testNamePlaceholder")} />
+                          <input className="input input-light" value={resultForm.test_name} onChange={(e) => setResultForm({ ...resultForm, test_name: e.target.value })} required placeholder={tr("testNamePlaceholder")} />
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">{tr("value")} *</label>
-                          <input className="input" type="number" step="0.01" value={resultForm.test_value} onChange={(e) => setResultForm({ ...resultForm, test_value: e.target.value })} required />
+                          <input className="input input-light" type="number" step="0.01" value={resultForm.test_value} onChange={(e) => setResultForm({ ...resultForm, test_value: e.target.value })} required />
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">{tr("unit")}</label>
-                          <input className="input" value={resultForm.unit} onChange={(e) => setResultForm({ ...resultForm, unit: e.target.value })} placeholder={tr("unitPlaceholder")} />
+                          <input className="input input-light" value={resultForm.unit} onChange={(e) => setResultForm({ ...resultForm, unit: e.target.value })} placeholder={tr("unitPlaceholder")} />
                         </div>
                         <div className="md:col-span-4 flex justify-end gap-2 mt-2">
                           <button type="button" className="btn-ghost text-xs" onClick={() => setShowAddResult(false)}>{tr("cancel")}</button>
