@@ -23,6 +23,7 @@ for p in (PROJECT_ROOT, MODEL_TRAINING_DIR):
 # Import the LSTM model class before importing InferenceService
 from train_models import ProgressionBiLSTM
 from app.services.inference_service import InferenceService
+from app.services.multi_disease_inference import multi_disease_inference as _multi_disease_inference_singleton
 from app.models import (
     Patient, DoctorVisit, LabTestResult, LabReport, 
     DiseaseProgression, FamilyDiseaseHistory, FamilyRelationship,
@@ -46,6 +47,8 @@ class ProgressionReportService:
     def __init__(self):
         self.inference = InferenceService()
         self.inference.load_models()
+        # Use the shared singleton — models are loaded lazily on first use
+        self.multi_inference = _multi_disease_inference_singleton
     
     def _calculate_severity_score(self, progression_stage: str, disease_name: str = None) -> float:
         """
@@ -57,28 +60,41 @@ class ProgressionReportService:
         
         stage_lower = progression_stage.lower().strip()
         
-        # CKD stages (eGFR-based)
+        # CKD stages — matches both short ("stage 1") and full diagnosis labels ("Early CKD Stage 1")
         ckd_scores = {
             'normal': 0.0,
+            'normal kidney function': 0.0,
             'stage 1': 1.0,
             'stage_1': 1.0,
+            'early ckd stage 1': 1.0,
+            'ckd stage 1': 1.0,
             'stage 2': 2.5,
             'stage_2': 2.5,
+            'early ckd stage 2': 2.5,
+            'ckd stage 2': 2.5,
             'stage 3a': 4.0,
             'stage_3a': 4.0,
+            'moderate ckd stage 3a': 4.0,
+            'ckd stage 3a': 4.0,
             'stage 3b': 5.5,
             'stage_3b': 5.5,
+            'moderate ckd stage 3b': 5.5,
+            'ckd stage 3b': 5.5,
             'stage 3': 5.0,
             'stage_3': 5.0,
             'stage 4': 7.5,
             'stage_4': 7.5,
+            'advanced ckd stage 4': 7.5,
+            'ckd stage 4': 7.5,
             'stage 5': 9.0,
             'stage_5': 9.0,
+            'ckd stage 5': 9.0,
             'esrd': 10.0,
             'end stage renal disease': 10.0,
+            'end stage renal disease (esrd)': 10.0,
             'dialysis': 10.0,
         }
-        
+
         # Diabetes progression scores
         diabetes_scores = {
             'normal': 0.0,
@@ -87,11 +103,13 @@ class ProgressionReportService:
             'controlled': 4.0,
             'diabetes': 5.0,
             'uncontrolled': 7.0,
+            'uncontrolled diabetes': 7.0,
             'complicated': 8.5,
+            'complicated diabetes': 8.5,
             'severe': 9.0,
             'critical': 10.0,
         }
-        
+
         # Anemia progression scores
         anemia_scores = {
             'normal': 0.0,
@@ -104,8 +122,31 @@ class ProgressionReportService:
             'moderate iron deficiency anemia': 5.5,
             'severe iron deficiency anemia': 8.0,
         }
-        
-        # Generic progression scores
+
+        # Parathyroid progression scores
+        parathyroid_scores = {
+            'normal parathyroid function': 0.0,
+            'indeterminate parathyroid pattern': 3.0,
+            'possible secondary hyperparathyroidism': 5.5,
+            'possible primary hyperparathyroidism': 7.0,
+            'possible hypoparathyroidism': 6.0,
+            'secondary hyperparathyroidism': 5.5,
+            'primary hyperparathyroidism': 7.0,
+            'hypoparathyroidism': 6.0,
+        }
+
+        # Oral cancer progression scores
+        oral_cancer_scores = {
+            'normal': 0.0,
+            'no oral lesion detected': 0.0,
+            'low risk': 2.0,
+            'suspicious oral lesion': 5.0,
+            'moderate risk': 5.0,
+            'possible oral cancer': 9.0,
+            'high risk': 9.0,
+        }
+
+        # Generic progression scores (fallback)
         generic_scores = {
             'normal': 0.0,
             'stable': 1.0,
@@ -122,28 +163,37 @@ class ProgressionReportService:
             'moderate risk': 6.0,
             'high risk': 9.0,
         }
-        
-        # Check CKD-specific scores first
-        if stage_lower in ckd_scores:
-            return ckd_scores[stage_lower]
-        
-        # Check diabetes-specific scores
-        if stage_lower in diabetes_scores:
-            return diabetes_scores[stage_lower]
-        
-        # Check anemia-specific scores
-        if stage_lower in anemia_scores:
-            return anemia_scores[stage_lower]
-        
-        # Fall back to generic scores
-        if stage_lower in generic_scores:
-            return generic_scores[stage_lower]
-        
-        # If no match, try partial matching
-        for key, score in generic_scores.items():
+
+        # Disease-specific lookup first (most precise)
+        if disease_name:
+            d = disease_name.lower()
+            if 'ckd' in d or 'kidney' in d:
+                if stage_lower in ckd_scores:
+                    return ckd_scores[stage_lower]
+            elif 'diabet' in d:
+                if stage_lower in diabetes_scores:
+                    return diabetes_scores[stage_lower]
+            elif 'anemia' in d or 'iron' in d:
+                if stage_lower in anemia_scores:
+                    return anemia_scores[stage_lower]
+            elif 'parathyroid' in d:
+                if stage_lower in parathyroid_scores:
+                    return parathyroid_scores[stage_lower]
+            elif 'oral' in d or 'cancer' in d:
+                if stage_lower in oral_cancer_scores:
+                    return oral_cancer_scores[stage_lower]
+
+        # Try all disease maps in order
+        for score_map in [ckd_scores, diabetes_scores, anemia_scores, parathyroid_scores, oral_cancer_scores, generic_scores]:
+            if stage_lower in score_map:
+                return score_map[stage_lower]
+
+        # Partial matching against all known keys
+        all_scores = {**ckd_scores, **diabetes_scores, **anemia_scores, **parathyroid_scores, **oral_cancer_scores, **generic_scores}
+        for key, score in all_scores.items():
             if key in stage_lower or stage_lower in key:
                 return score
-        
+
         # Default to middle value if unknown
         return 5.0
     
@@ -550,6 +600,22 @@ class ProgressionReportService:
             # Determine scenario
             has_recent_data = len(all_progressions) > 0
             has_lab_tests = len(lab_tests) > 0
+            has_clinical_data = bool(all_diseases or has_recent_data or has_lab_tests)
+
+            if not has_clinical_data:
+                return {
+                    "patient_id": str(patient_id),
+                    "patient_name": f"{patient.first_name} {patient.last_name}",
+                    "conditions_identified": [],
+                    "current_stages": {},
+                    "future_predictions": {},
+                    "has_recent_data": False,
+                    "has_lab_tests": False,
+                    "has_clinical_data": False,
+                    "summary": "",
+                    "recommendations": [],
+                    "generated_at": datetime.now().isoformat(),
+                }
             
             # Get current stages for all diseases
             current_stages = {}
@@ -580,6 +646,7 @@ class ProgressionReportService:
                 "future_predictions": future_predictions,
                 "has_recent_data": has_recent_data,
                 "has_lab_tests": has_lab_tests,
+                "has_clinical_data": True,
                 "summary": recommendations_resp.get("summary", ""),
                 "recommendations": recommendations_resp.get("recommendations", []),
                 "generated_at": datetime.now().isoformat()
@@ -1095,40 +1162,52 @@ Provide recommendations as a numbered list."""
             predictions = {}
             for disease in all_diseases:
                 try:
-                    # Get visit sequence for ML prediction
-                    visit_sequence = await self.inference.get_patient_visit_sequence(patient_id, db)
-                    
-                    if visit_sequence and len(visit_sequence) >= 2:
-                        # Make prediction using ML model
-                        ml_prediction = self.inference.predict_progression(visit_sequence)
-                        
-                        if 'error' not in ml_prediction:
-                            predictions[disease] = {
-                                'disease_name': disease,
-                                'current_stage': current_status.get(disease, {}).get('current_stage', 'Unknown'),
-                                'predicted_stage': ml_prediction['predicted_class'],
-                                'confidence_score': ml_prediction['prediction_confidence'],
-                                'model_used': ml_prediction['model_used'],
-                                'prediction_basis': 'ML model trained on visit sequence',
-                                'months_ahead': months_ahead,
-                                'risk_level': self._calculate_risk_level(ml_prediction['predicted_class'])
-                            }
-                        else:
-                            # Fallback to rule-based prediction
-                            predictions[disease] = self._rule_based_prediction(
-                                disease, 
-                                current_status.get(disease, {}),
-                                lab_tests,
-                                months_ahead
-                            )
-                    else:
-                        # Not enough data for ML, use rule-based
+                    disease_lower = disease.lower().strip()
+                    is_oral_cancer = "oral" in disease_lower or "cancer" in disease_lower
+
+                    if is_oral_cancer:
+                        # Oral cancer has no LSTM model — use rule-based with oral cancer stages
                         predictions[disease] = self._rule_based_prediction(
                             disease,
                             current_status.get(disease, {}),
                             lab_tests,
                             months_ahead
                         )
+                    else:
+                        # Get visit sequence for ML prediction
+                        visit_sequence = await self.inference.get_patient_visit_sequence(patient_id, db)
+
+                        ml_success = False
+                        if visit_sequence and len(visit_sequence) >= 2:
+                            try:
+                                if not self.multi_inference._models_loaded:
+                                    raise RuntimeError("ML models not yet loaded — using rule-based fallback")
+                                ml_prediction = self.multi_inference.predict_disease_progression(
+                                    disease_lower, visit_sequence
+                                )
+                                if 'error' not in ml_prediction:
+                                    predictions[disease] = {
+                                        'disease_name': disease,
+                                        'current_stage': current_status.get(disease, {}).get('current_stage', 'Unknown'),
+                                        'predicted_stage': ml_prediction.get('predicted_class', ml_prediction.get('predicted_stage', 'Unknown')),
+                                        'confidence_score': ml_prediction.get('prediction_confidence', ml_prediction.get('confidence', 0.6)),
+                                        'model_used': ml_prediction.get('model_used', f'{disease_lower}_lstm'),
+                                        'prediction_basis': 'ML model (disease-specific LSTM)',
+                                        'months_ahead': months_ahead,
+                                        'risk_level': self._calculate_risk_level(ml_prediction.get('predicted_class', ''))
+                                    }
+                                    ml_success = True
+                            except Exception as ml_err:
+                                print(f"ML prediction failed for {disease}: {ml_err}")
+
+                        if not ml_success:
+                            # Fallback to disease-aware rule-based prediction
+                            predictions[disease] = self._rule_based_prediction(
+                                disease,
+                                current_status.get(disease, {}),
+                                lab_tests,
+                                months_ahead
+                            )
                         
                 except Exception as e:
                     print(f"Error predicting progression for {disease}: {e}")
@@ -1174,37 +1253,160 @@ Provide recommendations as a numbered list."""
         lab_tests: List,
         months_ahead: int
     ) -> Dict[str, Any]:
-        """Rule-based prediction when ML model can't be used"""
+        """Rule-based prediction when ML model can't be used — uses disease-specific stage names"""
         current_stage = current_status.get('current_stage', 'Unknown')
-        
+
         # Analyze lab trends
         abnormal_count = sum(1 for test in lab_tests if test[2])  # is_abnormal
         total_tests = len(lab_tests)
         abnormal_ratio = abnormal_count / total_tests if total_tests > 0 else 0
-        
-        # Predict based on current stage and lab results
-        if current_stage.lower() in ['cured', 'normal']:
-            if abnormal_ratio > 0.3:
-                predicted = 'stable_with_monitoring'
-                confidence = 0.65
+
+        disease_lower = disease.lower().strip()
+
+        # ── Oral Cancer ──────────────────────────────────────────────────────────
+        if "oral" in disease_lower or "cancer" in disease_lower:
+            oral_stage_map = {
+                "normal": ["No Oral Lesion Detected", "No Oral Lesion Detected", "Low Risk"],
+                "no oral lesion detected": ["No Oral Lesion Detected", "No Oral Lesion Detected", "Low Risk"],
+                "low risk": ["Low Risk", "Low Risk", "Suspicious Oral Lesion"],
+                "suspicious oral lesion": ["Suspicious Oral Lesion", "Suspicious Oral Lesion", "Possible Oral Cancer"],
+                "moderate risk": ["Suspicious Oral Lesion", "Suspicious Oral Lesion", "Possible Oral Cancer"],
+                "possible oral cancer": ["Possible Oral Cancer", "Possible Oral Cancer", "Possible Oral Cancer"],
+                "high risk": ["Possible Oral Cancer", "Possible Oral Cancer", "Possible Oral Cancer"],
+            }
+            key = current_stage.lower().strip()
+            stages = oral_stage_map.get(key, None)
+            if stages:
+                if abnormal_ratio < 0.3:
+                    predicted, confidence = stages[0], 0.72
+                elif abnormal_ratio < 0.6:
+                    predicted, confidence = stages[1], 0.65
+                else:
+                    predicted, confidence = stages[2], 0.58
             else:
-                predicted = 'likely_stable'
-                confidence = 0.75
-        elif current_stage.lower() in ['controlled', 'mild']:
-            if abnormal_ratio > 0.5:
-                predicted = 'possible_worsening'
-                confidence = 0.60
+                predicted, confidence = current_stage if current_stage != "Unknown" else "Low Risk", 0.55
+
+        # ── CKD ──────────────────────────────────────────────────────────────────
+        elif "ckd" in disease_lower or "kidney" in disease_lower:
+            ckd_progression = [
+                "Normal Kidney Function", "Early CKD Stage 1", "Early CKD Stage 2",
+                "Moderate CKD Stage 3a", "Moderate CKD Stage 3b", "Advanced CKD Stage 4",
+                "End Stage Renal Disease (ESRD)"
+            ]
+            current_lower = current_stage.lower()
+            if "normal" in current_lower:
+                idx = 0
+            elif "stage 1" in current_lower or "early ckd stage 1" in current_lower:
+                idx = 1
+            elif "stage 2" in current_lower or "early ckd stage 2" in current_lower:
+                idx = 2
+            elif "stage 3a" in current_lower or "moderate ckd stage 3a" in current_lower:
+                idx = 3
+            elif "stage 3b" in current_lower or "moderate ckd stage 3b" in current_lower or "stage 3" in current_lower:
+                idx = 4
+            elif "stage 4" in current_lower or "advanced" in current_lower:
+                idx = 5
             else:
-                predicted = 'likely_stable'
-                confidence = 0.70
-        else:  # Complicated, severe, etc.
-            if abnormal_ratio > 0.6:
-                predicted = 'high_risk_progression'
+                idx = 6  # ESRD or unknown → keep at top
+            if abnormal_ratio < 0.3:
+                predicted = ckd_progression[idx]
+                confidence = 0.72
+            elif abnormal_ratio < 0.6:
+                predicted = ckd_progression[min(idx + 1, len(ckd_progression) - 1)]
+                confidence = 0.62
+            else:
+                predicted = ckd_progression[min(idx + 2, len(ckd_progression) - 1)]
                 confidence = 0.55
+
+        # ── Diabetes ─────────────────────────────────────────────────────────────
+        elif "diabet" in disease_lower:
+            diabetes_progression = ["Normal", "Prediabetes", "Controlled", "Uncontrolled", "Complicated"]
+            current_lower = current_stage.lower()
+            if "normal" in current_lower:
+                idx = 0
+            elif "prediabet" in current_lower:
+                idx = 1
+            elif "controlled" in current_lower and "uncontrolled" not in current_lower:
+                idx = 2
+            elif "uncontrolled" in current_lower:
+                idx = 3
             else:
-                predicted = 'requires_monitoring'
-                confidence = 0.60
-        
+                idx = 4
+            if abnormal_ratio < 0.3:
+                predicted = diabetes_progression[idx]
+                confidence = 0.72
+            elif abnormal_ratio < 0.6:
+                predicted = diabetes_progression[min(idx + 1, len(diabetes_progression) - 1)]
+                confidence = 0.63
+            else:
+                predicted = diabetes_progression[min(idx + 2, len(diabetes_progression) - 1)]
+                confidence = 0.55
+
+        # ── Anemia ───────────────────────────────────────────────────────────────
+        elif "anemia" in disease_lower or "iron" in disease_lower:
+            anemia_progression = [
+                "Normal", "Iron Deficiency Without Anemia",
+                "Mild Iron Deficiency Anemia", "Moderate Iron Deficiency Anemia",
+                "Severe Iron Deficiency Anemia"
+            ]
+            current_lower = current_stage.lower()
+            if "normal" in current_lower and "iron" not in current_lower:
+                idx = 0
+            elif "without anemia" in current_lower or ("iron deficiency" in current_lower and "anemia" not in current_lower):
+                idx = 1
+            elif "mild" in current_lower:
+                idx = 2
+            elif "moderate" in current_lower:
+                idx = 3
+            else:
+                idx = 4
+            if abnormal_ratio < 0.3:
+                predicted = anemia_progression[idx]
+                confidence = 0.72
+            elif abnormal_ratio < 0.6:
+                predicted = anemia_progression[min(idx + 1, len(anemia_progression) - 1)]
+                confidence = 0.63
+            else:
+                predicted = anemia_progression[min(idx + 2, len(anemia_progression) - 1)]
+                confidence = 0.55
+
+        # ── Parathyroid ──────────────────────────────────────────────────────────
+        elif "parathyroid" in disease_lower:
+            current_lower = current_stage.lower()
+            if "normal" in current_lower:
+                if abnormal_ratio < 0.3:
+                    predicted, confidence = "Normal Parathyroid Function", 0.73
+                elif abnormal_ratio < 0.6:
+                    predicted, confidence = "Indeterminate Parathyroid Pattern", 0.62
+                else:
+                    predicted, confidence = "Possible Secondary Hyperparathyroidism", 0.55
+            elif "indeterminate" in current_lower:
+                if abnormal_ratio < 0.5:
+                    predicted, confidence = "Indeterminate Parathyroid Pattern", 0.65
+                else:
+                    predicted, confidence = "Possible Secondary Hyperparathyroidism", 0.58
+            elif "secondary" in current_lower:
+                if abnormal_ratio < 0.5:
+                    predicted, confidence = "Possible Secondary Hyperparathyroidism", 0.65
+                else:
+                    predicted, confidence = "Possible Primary Hyperparathyroidism", 0.57
+            elif "hypo" in current_lower:
+                predicted, confidence = "Possible Hypoparathyroidism", 0.65
+            else:
+                predicted, confidence = "Possible Primary Hyperparathyroidism", 0.58
+
+        # ── Generic fallback (should not be reached) ─────────────────────────────
+        else:
+            if current_stage.lower() in ['cured', 'normal']:
+                predicted = current_stage if abnormal_ratio < 0.3 else current_stage
+                confidence = 0.68
+            elif current_stage.lower() in ['controlled', 'mild']:
+                predicted = current_stage if abnormal_ratio < 0.5 else current_stage
+                confidence = 0.62
+            else:
+                predicted = current_stage
+                confidence = 0.55
+
         return {
             'disease_name': disease,
             'current_stage': current_stage,
@@ -1219,10 +1421,20 @@ Provide recommendations as a numbered list."""
     def _calculate_risk_level(self, predicted_stage: str) -> str:
         """Calculate risk level from predicted stage"""
         stage_lower = predicted_stage.lower()
-        
-        if any(word in stage_lower for word in ['worsening', 'high_risk', 'progression', 'complicated']):
+
+        high_risk_terms = [
+            'worsening', 'high_risk', 'high risk', 'progression', 'complicated',
+            'possible oral cancer', 'esrd', 'end stage', 'stage 5', 'stage 4',
+            'advanced ckd', 'severe', 'uncontrolled', 'possible primary hyperparathyroidism'
+        ]
+        medium_risk_terms = [
+            'possible', 'monitoring', 'moderate', 'stage 3', 'stage 3a', 'stage 3b',
+            'suspicious', 'prediabet', 'indeterminate', 'secondary hyperparathyroidism',
+            'possible hypoparathyroidism', 'mild', 'stage 2', 'controlled'
+        ]
+        if any(term in stage_lower for term in high_risk_terms):
             return 'HIGH'
-        elif any(word in stage_lower for word in ['possible', 'monitoring', 'moderate']):
+        elif any(term in stage_lower for term in medium_risk_terms):
             return 'MEDIUM'
         else:
             return 'LOW'

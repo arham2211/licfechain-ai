@@ -268,8 +268,8 @@ export default function FamilyPage() {
         >
           <div className="flex items-center gap-2 mb-6">
             <Users size={18} className="text-primary" />
-            <h2 className="text-base font-semibold">{tr("familyHierarchy")}</h2>
-            <span className="text-xs text-muted ml-auto">{data.total_blood_relatives} {tr("relatives")}</span>
+            <h2 className="text-base font-extrabold text-slate-900">{tr("familyHierarchy")}</h2>
+            <span className="text-xs font-semibold text-slate-600 ml-auto">{data.total_blood_relatives} {tr("relatives")}</span>
           </div>
 
           <div className="flex flex-col items-center gap-0">
@@ -286,7 +286,7 @@ export default function FamilyPage() {
                   )}
 
                   {/* Generation label */}
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted mb-3 px-3 py-1 rounded-full bg-primary/5 border border-primary/10">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 mb-3 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                     <Icon size={12} />
                     {tr(meta.labelKey)}
                   </div>
@@ -317,14 +317,14 @@ export default function FamilyPage() {
                           </div>
                         )}
 
-                        <span className={`text-sm font-semibold text-center leading-tight ${member.isSelf ? "text-white" : ""}`}>
+                        <span className={`text-sm font-bold text-center leading-tight ${member.isSelf ? "text-white" : member.hasDiseases ? "text-slate-900" : "text-white"}`}>
                           {member.name}
                         </span>
-                        <span className={`text-[11px] mt-1 ${member.isSelf ? "text-white/70" : "text-muted"}`}>
+                        <span className={`text-[11px] mt-1 font-semibold ${member.isSelf ? "text-white/80" : member.hasDiseases ? "text-slate-600" : "text-white/80"}`}>
                           {member.label}
                         </span>
                         {!member.isBlood && (
-                          <span className="text-[9px] mt-0.5 px-1.5 py-0.5 rounded bg-white/10 text-muted">
+                          <span className="text-[9px] mt-0.5 px-1.5 py-0.5 rounded bg-white/20 text-white font-bold">
                             {tr("nonBlood")}
                           </span>
                         )}
@@ -342,7 +342,7 @@ export default function FamilyPage() {
           </div>
 
           {/* Legend */}
-          <div className="mt-6 pt-4 border-t border-border flex flex-wrap gap-4 text-xs text-muted">
+          <div className="mt-6 pt-4 border-t border-border flex flex-wrap gap-4 text-xs text-slate-700 font-semibold">
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-3 w-3 rounded-full bg-gradient-to-r from-primary to-primary/80" /> {tr("you")}
             </span>
@@ -369,9 +369,9 @@ export default function FamilyPage() {
         >
           <div className="flex items-center gap-2 mb-2">
             <Dna size={18} className="text-primary" />
-            <h2 className="text-base font-semibold">{tr("hereditaryRisk")}</h2>
+            <h2 className="text-base font-extrabold text-slate-900">{tr("hereditaryRisk")}</h2>
           </div>
-          <p className="text-xs text-muted mb-5">
+          <p className="text-xs text-slate-600 font-medium mb-5">
             {tr("hereditaryRiskHelp")}
           </p>
 
@@ -395,7 +395,7 @@ export default function FamilyPage() {
                       ) : (
                         <HeartPulse size={18} className={colors.text} />
                       )}
-                      <span className="font-semibold capitalize text-sm">{risk.disease}</span>
+                      <span className="font-extrabold capitalize text-sm text-slate-900">{risk.disease}</span>
                     </div>
                     <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} border ${colors.border}`}>
                       {risk.riskLevel} {tr("risk")}
@@ -412,14 +412,14 @@ export default function FamilyPage() {
 
                   {/* Affected relatives */}
                   <div className="space-y-1">
-                    <span className="text-[10px] font-medium text-muted uppercase tracking-wider">
+                    <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                       {risk.bloodRelativeCount} {tr("affectedRelatives")}
                     </span>
                     {risk.affectedRelatives.map((ar, i) => (
                       <div key={i} className="flex items-center gap-2 text-xs">
                         <Heart size={10} className={colors.text} />
-                        <span className="font-medium">{ar.name}</span>
-                        <span className="text-muted">({ar.relationship})</span>
+                        <span className="font-bold text-slate-800">{ar.name}</span>
+                        <span className="text-slate-600 font-medium">({ar.relationship})</span>
                       </div>
                     ))}
                   </div>
@@ -432,8 +432,8 @@ export default function FamilyPage() {
           <div className="mt-5 rounded-xl bg-primary/5 border border-primary/15 p-4 flex items-start gap-3">
             <Dna size={20} className="text-primary mt-0.5 shrink-0" />
             <div className="text-sm">
-              <p className="font-medium mb-1">{tr("whatDoesThisMean")}</p>
-              <p className="text-muted text-xs leading-relaxed">
+              <p className="font-bold text-slate-900 mb-1">{tr("whatDoesThisMean")}</p>
+              <p className="text-slate-600 text-xs leading-relaxed">
                 {tr("hereditaryRiskDisclaimer")}
               </p>
             </div>
@@ -443,7 +443,7 @@ export default function FamilyPage() {
 
       {/* Empty state */}
       {!data && !loading && !error && (
-        <div className="card p-8 text-center text-muted">
+        <div className="card border-white/70 bg-white/78 p-8 text-center text-muted shadow-[0_20px_60px_rgba(2,132,199,0.08)] backdrop-blur-xl">
           {isPatient
             ? tr("loadingFamilyTree")
             : tr("enterPatientIdFamilyTree")}
@@ -451,8 +451,8 @@ export default function FamilyPage() {
       )}
 
       {data && risks.length === 0 && !loading && (
-        <div className="card p-6 text-center">
-          <Heart size={32} className="mx-auto mb-3 text-emerald-500" />
+        <div className="card border-white/70 bg-white/78 p-6 text-center shadow-[0_20px_60px_rgba(2,132,199,0.08)] backdrop-blur-xl">
+          <Heart size={32} className="mx-auto mb-3 text-primary" />
           <p className="font-medium text-sm">{tr("noHereditaryRisk")}</p>
           <p className="text-xs text-muted mt-1">{tr("noHereditaryRiskSubtitle")}</p>
         </div>

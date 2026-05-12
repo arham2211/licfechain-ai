@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Users, GitBranch, Stethoscope, CalendarDays,
-  FlaskConical, Brain, BarChart3, Globe, ScanLine, Smile,
+  FlaskConical, Brain, BarChart3, Globe, ScanLine, Smile, FileText,
   LogOut, Menu, X, Languages, ChevronRight, Heart,
   type LucideIcon,
 } from "lucide-react";
-import { logout } from "@/lib/api-client";
+import { logout, api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
 import { AppLanguage } from "@/lib/language";
 import { useLanguage } from "@/components/providers/LanguageProvider";
@@ -20,6 +20,7 @@ type NavItem = {
   href: string;
   key: string;
   patientKey?: string;
+  doctorKey?: string;
   icon: LucideIcon;
   roles: RoleName[];
 };
@@ -27,15 +28,16 @@ type NavItem = {
 const allRoles: RoleName[] = ["admin", "doctor", "patient", "lab"];
 
 const navItems: NavItem[] = [
-  { href: "/dashboard", key: "dashboard", patientKey: "myDashboard", icon: LayoutDashboard, roles: allRoles },
-  { href: "/patients", key: "patients", patientKey: "myProfile", icon: Users, roles: ["admin", "doctor", "patient"] },
+  { href: "/dashboard", key: "dashboard", patientKey: "myDashboard", doctorKey: "myDashboard", icon: LayoutDashboard, roles: allRoles },
+  { href: "/patients", key: "patients", patientKey: "myProfile", doctorKey: "myPatients", icon: Users, roles: ["admin", "doctor", "patient"] },
+  { href: "/doctors", key: "doctors", icon: Stethoscope, roles: ["admin"] },
   { href: "/family", key: "familyTree", icon: GitBranch, roles: ["admin", "doctor", "patient"] },
-  { href: "/doctors", key: "doctors", icon: Stethoscope, roles: ["admin", "doctor"] },
-  { href: "/visits", key: "visits", patientKey: "myVisits", icon: CalendarDays, roles: ["admin", "doctor", "patient"] },
-  { href: "/labs", key: "labs", patientKey: "labReports", icon: FlaskConical, roles: ["admin", "doctor", "patient"] },
+  { href: "/visits", key: "visits", icon: CalendarDays, roles: ["admin", "doctor", "patient"] },
+  { href: "/labs", key: "labs", patientKey: "labReports", doctorKey: "labReports", icon: FlaskConical, roles: ["admin", "doctor", "patient"] },
   { href: "/labs/labs", key: "labs", icon: FlaskConical, roles: ["lab"] },
   { href: "/labs/reports", key: "reports", icon: BarChart3, roles: ["lab"] },
-  { href: "/reports", key: "reports", patientKey: "healthReports", icon: BarChart3, roles: ["admin", "doctor", "patient"] },
+  { href: "/labs/reports", key: "patientReports", icon: FileText, roles: ["admin"] },
+  { href: "/reports", key: "progressionGraph", patientKey: "healthReports", doctorKey: "healthReports", icon: BarChart3, roles: ["admin", "doctor", "patient"] },
 ];
 
 
@@ -43,7 +45,7 @@ const navItems: NavItem[] = [
 const roleBadge: Record<string, string> = {
   admin: "bg-red-500/15 text-red-500",
   doctor: "bg-primary/15 text-primary",
-  patient: "bg-emerald-500/15 text-emerald-500",
+  patient: "bg-cyan-500/15 text-cyan-600 border border-cyan-500/20",
   lab: "bg-amber-500/15 text-amber-500",
 };
 
@@ -52,43 +54,44 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const { language, changeLanguage, tr } = useLanguage();
-  const [viewMode, setViewMode] = useState<"clinical" | "personal">("clinical");
   const user = getUser();
   const userRoles: RoleName[] = user?.roles ?? [];
   const primaryRole = userRoles[0] ?? "patient";
 
-  const isDoctor = userRoles.includes("doctor");
-  const hasPatientId = !!user?.patient_id;
-  const showDualToggle = isDoctor && hasPatientId;
+  const isDoctor = userRoles.includes("doctor") && !userRoles.includes("patient");
+  const isPatientRole = primaryRole === "patient";
+  const isLab = userRoles.includes("lab");
 
-  const isPatientRole = primaryRole === "patient" || (viewMode === "personal" && hasPatientId);
+  const [labName, setLabName] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
 
-  const visibleNavItems = (() => {
-    // Doctor with dual mode gets two distinct sidebars:
-    // - Clinical: doctor menu but without Doctors/Labs
-    // - Personal: patient-style menu
-    if (showDualToggle) {
-      if (viewMode === "personal") {
-        const ownPatientId = user?.patient_id;
-        return navItems
-          .filter((item) => item.roles.includes("patient"))
-          .map((item) =>
-            item.href === "/patients" && ownPatientId
-              ? { ...item, href: `/patients/${ownPatientId}` }
-              : item
-          );
-      }
-      return navItems.filter(
-        (item) =>
-          item.roles.includes("doctor") &&
-          item.href !== "/doctors" &&
-          item.href !== "/labs"
-      );
-    }
-    return navItems.filter((item) =>
-      userRoles.some((role) => item.roles.includes(role))
-    );
-  })();
+  useEffect(() => {
+    if (!isLab) return;
+    api.request<{ lab_id: string; lab_name: string; email?: string }[]>("/labs")
+      .then((allLabs) => {
+        const userEmail = (user?.email ?? "").toLowerCase();
+        const matched = allLabs.find((l) => (l.email ?? "").toLowerCase() === userEmail) ?? null;
+        if (matched) setLabName(matched.lab_name);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLab]);
+
+  useEffect(() => {
+    const pid = user?.patient_id;
+    if (!pid) return;
+    api.request<{ first_name: string; last_name: string }>(`/patients/${pid}`)
+      .then((p) => setDisplayName(`${p.first_name} ${p.last_name}`))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.patient_id]);
+  // Premium shell = glassmorphism BG + frosted sidebar (all roles)
+  const usePremiumShell = true;
+
+  // Each role always sees their own nav items — no dual toggling
+  const visibleNavItems = navItems.filter((item) =>
+    userRoles.some((role) => item.roles.includes(role))
+  );
 
 
   async function handleLogout() {
@@ -107,16 +110,30 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={`min-h-screen ${usePremiumShell ? "patient-shell" : "bg-background"}`}>
+      {usePremiumShell && (
+        <>
+          <div className="pointer-events-none fixed inset-0 -z-20 bg-gradient-to-br from-slate-50 via-white to-cyan-50/70" />
+          <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+            <div className="absolute top-[-8%] left-[-10%] h-[34rem] w-[34rem] rounded-full bg-primary-200/25 blur-[120px]" />
+            <div className="absolute right-[-10%] bottom-[-8%] h-[30rem] w-[30rem] rounded-full bg-cyan-200/30 blur-[120px]" />
+            <div className="absolute top-1/3 left-1/3 h-72 w-72 rounded-full bg-sky-100/25 blur-[90px]" />
+          </div>
+        </>
+      )}
       {/* ── Header ── */}
       <header
-        className="sticky top-0 z-40 border-b border-border/50"
-        style={{ background: "var(--card)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" }}
+        className={`sticky top-0 z-40 border-b ${usePremiumShell ? "border-primary/10" : "border-border/50"}`}
+        style={{
+          background: usePremiumShell ? "rgba(255,255,255,0.86)" : "var(--card)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+        }}
       >
         <div className="mx-auto flex max-w-[1440px] items-center justify-between px-4 py-3 lg:px-6">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--gradient-start)] to-[var(--gradient-end)] shadow-lg shadow-primary/20">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg shadow-primary/20">
                 <Heart className="h-5 w-5 text-white" strokeWidth={2.5} />
               </div>
               <span className="text-lg font-bold gradient-text tracking-tight">LifeChain AI</span>
@@ -138,7 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="flex items-center gap-1.5 rounded-lg border border-border/50 px-2.5 py-1.5">
               <Languages size={14} className="text-muted" />
               <select
-                className="bg-transparent text-xs font-medium outline-none cursor-pointer"
+                className="navbar-lang-select"
                 value={language}
                 onChange={(e) => handleLanguageChange(e.target.value as AppLanguage)}
               >
@@ -150,24 +167,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div className="h-5 w-px bg-border/50" />
 
-            {false && showDualToggle && (
+            {false && (
               <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 mr-4">
-                <button
-                  onClick={() => setViewMode("clinical")}
-                  className={`px-3 py-1 text-xs font-bold rounded-full transition ${viewMode === "clinical" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                >
-                  Clinical
-                </button>
-                <button
-                  onClick={() => setViewMode("personal")}
-                  className={`px-3 py-1 text-xs font-bold rounded-full transition ${viewMode === "personal" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-emerald-500"}`}
-                >
-                  Personal
-                </button>
               </div>
             )}
 
-            <div className="text-sm font-medium text-muted">{user?.username ?? tr("unknownUser")}</div>
+            <div className="text-sm font-medium text-muted">
+              {isLab && labName ? labName : displayName ?? user?.username ?? tr("unknownUser")}
+            </div>
             <button
               className="flex items-center gap-1.5 rounded-lg bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-500 transition-colors hover:bg-red-500/20"
               onClick={handleLogout}
@@ -181,7 +188,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       </header >
 
-      <div className="mx-auto grid max-w-[1440px] grid-cols-1 gap-0 md:grid-cols-[260px_1fr]">
+      <div className="mx-auto grid max-w-[1440px] grid-cols-1 gap-0 md:grid-cols-[280px_1fr]">
         {/* ── Sidebar ── */}
         <AnimatePresence>
           {(menuOpen || typeof window === "undefined") && (
@@ -196,7 +203,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 items={visibleNavItems}
                 pathname={pathname}
                 tr={tr}
+                isPremium={usePremiumShell}
                 isPatient={isPatientRole}
+                isDoctor={isDoctor}
                 onNav={() => setMenuOpen(false)}
               />
               <div className="mt-4 space-y-2 border-t border-border/50 pt-4">
@@ -227,11 +236,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <aside className="hidden md:block">
           <div className="sticky top-[65px] h-[calc(100vh-65px)] overflow-y-auto p-4">
-            <SidebarContent items={visibleNavItems} pathname={pathname} tr={tr} isPatient={isPatientRole} />
+            <div className={usePremiumShell ? "rounded-[28px] border border-white/70 bg-white/72 p-3 shadow-[0_25px_80px_rgba(2,132,199,0.12)] backdrop-blur-2xl" : ""}>
+              <SidebarContent items={visibleNavItems} pathname={pathname} tr={tr} isPremium={usePremiumShell} isPatient={isPatientRole} isDoctor={isDoctor} />
+            </div>
           </div>
         </aside>
 
-        <main className="min-w-0 p-4 lg:p-6">{children}</main>
+        <main className={`min-w-0 p-4 lg:p-6 ${usePremiumShell ? "pt-6 lg:pt-8" : ""}`}>{children}</main>
       </div>
     </div >
   );
@@ -241,21 +252,31 @@ function SidebarContent({
   items,
   pathname,
   tr,
+  isPremium,
   isPatient,
+  isDoctor,
   onNav,
 }: {
   items: NavItem[];
   pathname: string;
   tr: (key: string) => string;
+  isPremium?: boolean;
   isPatient?: boolean;
+  isDoctor?: boolean;
   onNav?: () => void;
 }) {
   return (
     <nav className="space-y-1">
       {items.map((item) => {
-        const active = pathname === item.href || pathname?.startsWith(item.href + "/");
+        // Only use prefix-match when no item has an exact href match for the current path
+        const hasExactMatch = items.some((i) => i.href === pathname);
+        const active = pathname === item.href || (!hasExactMatch && pathname?.startsWith(item.href + "/"));
         const Icon = item.icon;
-        const label = isPatient && item.patientKey ? tr(item.patientKey) : tr(item.key);
+        const label = isDoctor && item.doctorKey
+          ? tr(item.doctorKey)
+          : isPatient && item.patientKey
+          ? tr(item.patientKey)
+          : tr(item.key);
         return (
           <Link
             key={item.href}
@@ -273,11 +294,11 @@ function SidebarContent({
             )}
             <Icon
               size={18}
-              className={`relative z-10 transition-colors duration-200 ${active ? "text-white" : isPatient && item.patientKey ? "text-emerald-500 group-hover:text-emerald-600" : "text-muted group-hover:text-primary"
+              className={`relative z-10 transition-colors duration-200 ${active ? "text-white" : isPremium ? "text-slate-700 group-hover:text-primary" : "text-muted group-hover:text-primary"
                 }`}
             />
             <span
-              className={`relative z-10 font-medium transition-colors duration-200 ${active ? "text-white" : isPatient && item.patientKey ? "text-emerald-600 group-hover:text-emerald-700" : "text-foreground group-hover:text-primary"
+              className={`relative z-10 font-medium transition-colors duration-200 ${active ? "text-white" : isPremium ? "text-slate-800 group-hover:text-primary" : "text-foreground group-hover:text-primary"
                 }`}
             >
               {label}

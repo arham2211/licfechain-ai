@@ -171,7 +171,7 @@ export default function VisitDetailPage() {
                 subtitle={`${String(visit!.visit_date).slice(0, 16).replace("T", " ")}`}
                 right={
                     <div className="flex items-center gap-2">
-                        <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => router.push("/visits")}>← {tr("back")}</button>
+                        <button className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-bold text-primary shadow-sm hover:bg-primary/20 transition" onClick={() => router.push("/visits")}>← {tr("back")}</button>
                         {canEdit && (
                             <button className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" onClick={handleDeleteVisit}>{tr("deleteVisit")}</button>
                         )}
@@ -184,18 +184,18 @@ export default function VisitDetailPage() {
             {/* Visit Details */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="card p-4">
-                    <h3 className="mb-3 font-semibold">{tr("visitInformation")}</h3>
+                    <h3 className="mb-3 text-base font-bold text-primary">{tr("visitInformation")}</h3>
                     <div className="space-y-2 text-sm">
-                        <div className="flex justify-between"><span className="text-muted">{tr("patientId")}</span><span className="text-xs">{visit!.patient_id}</span></div>
-                        <div className="flex justify-between"><span className="text-muted">{tr("doctorId")}</span><span className="text-xs">{visit!.doctor_patient_id}</span></div>
-                        <div className="flex justify-between"><span className="text-muted">{tr("type")}</span><span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{visit!.visit_type}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-500">{tr("patientId")}</span><span className="text-xs font-semibold text-slate-800">{visit!.patient_id}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-500">{tr("doctorId")}</span><span className="text-xs font-semibold text-slate-800">{visit!.doctor_patient_id}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-500">{tr("type")}</span><span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary font-semibold">{visit!.visit_type}</span></div>
                     </div>
                 </div>
                 <div className="card p-4">
-                    <h3 className="mb-3 font-semibold">{tr("clinicalNotes")}</h3>
+                    <h3 className="mb-3 text-base font-bold text-primary">{tr("clinicalNotes")}</h3>
                     <div className="space-y-2 text-sm">
-                        <div><span className="text-muted">{tr("chiefComplaint")}:</span><p className="mt-1">{visit!.chief_complaint || tr("noneRecorded")}</p></div>
-                        <div><span className="text-muted">{tr("doctorNotes")}:</span><p className="mt-1">{visit!.doctor_notes || tr("noneRecorded")}</p></div>
+                        <div><span className="text-slate-500 text-xs uppercase tracking-wide font-semibold">{tr("chiefComplaint")}</span><p className="mt-1 text-slate-800">{visit!.chief_complaint || <span className="text-slate-400 italic">{tr("noneRecorded")}</span>}</p></div>
+                        <div><span className="text-slate-500 text-xs uppercase tracking-wide font-semibold">{tr("doctorNotes")}</span><p className="mt-1 text-slate-800">{visit!.doctor_notes || <span className="text-slate-400 italic">{tr("noneRecorded")}</span>}</p></div>
                     </div>
                 </div>
             </div>
@@ -203,7 +203,7 @@ export default function VisitDetailPage() {
             {/* Symptoms Section */}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">{tr("symptoms")} ({symptoms.length})</h3>
+                    <h3 className="text-base font-bold text-primary">{tr("symptoms")} <span className="text-slate-400 font-normal text-sm">({symptoms.length})</span></h3>
                     {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowSymptom(true); setFormError(null); }}>+ {tr("addSymptom")}</button>}
                 </div>
                 {showSymptom && (
@@ -218,11 +218,11 @@ export default function VisitDetailPage() {
                         <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowSymptom(false)}>{tr("cancel")}</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? tr("adding") : tr("add")}</button></div>
                     </form>
                 )}
-                {symptoms.length === 0 ? <p className="text-sm text-muted">{tr("noSymptomsRecorded")}</p> : (
+                {symptoms.length === 0 ? <p className="text-sm italic text-slate-400">{tr("noSymptomsRecorded")}</p> : (
                     <div className="space-y-2">{symptoms.map((s) => (
                         <div key={s.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                            <div><span className="font-medium">{s.symptom_name}</span>{s.severity ? <span className="ml-2 text-xs text-muted">{tr("severity")}: {s.severity}/10</span> : null}{s.duration_days ? <span className="ml-2 text-xs text-muted">{s.duration_days}d</span> : null}</div>
-                            {s.notes && <span className="text-xs text-muted">{s.notes}</span>}
+                            <div><span className="font-semibold text-slate-800">{s.symptom_name}</span>{s.severity ? <span className="ml-2 text-xs text-slate-400">{tr("severity")}: {s.severity}/10</span> : null}{s.duration_days ? <span className="ml-2 text-xs text-slate-400">{s.duration_days}d</span> : null}</div>
+                            {s.notes && <span className="text-xs text-slate-500">{s.notes}</span>}
                         </div>
                     ))}</div>
                 )}
@@ -231,7 +231,7 @@ export default function VisitDetailPage() {
             {/* Diagnoses Section */}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">{tr("diagnoses")} ({diagnoses.length})</h3>
+                    <h3 className="text-base font-bold text-primary">{tr("diagnoses")} <span className="text-slate-400 font-normal text-sm">({diagnoses.length})</span></h3>
                     {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowDiagnosis(true); setFormError(null); }}>+ {tr("addDiagnosis")}</button>}
                 </div>
                 {showDiagnosis && (
@@ -250,15 +250,15 @@ export default function VisitDetailPage() {
                         <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowDiagnosis(false)}>{tr("cancel")}</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? tr("adding") : tr("add")}</button></div>
                     </form>
                 )}
-                {diagnoses.length === 0 ? <p className="text-sm text-muted">{tr("noDiagnosesRecorded")}</p> : (
+                {diagnoses.length === 0 ? <p className="text-sm italic text-slate-400">{tr("noDiagnosesRecorded")}</p> : (
                     <div className="space-y-2">{diagnoses.map((d) => (
                         <div key={d.diagnosis_id} className="rounded-md border border-border px-3 py-2 text-sm">
                             <div className="flex items-center gap-2">
-                                <span className="font-medium">{d.disease_name}</span>
-                                <span className={`rounded-full px-2 py-0.5 text-xs ${d.status === "confirmed" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"}`}>{d.status}</span>
-                                {d.confidence_score != null && <span className="text-xs text-muted">{(d.confidence_score * 100).toFixed(0)}% {tr("confidence")}</span>}
+                                <span className="font-semibold text-slate-800">{d.disease_name}</span>
+                                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${d.status === "confirmed" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"}`}>{d.status}</span>
+                                {d.confidence_score != null && <span className="text-xs text-slate-400">{(d.confidence_score * 100).toFixed(0)}% {tr("confidence")}</span>}
                             </div>
-                            {d.notes && <p className="mt-1 text-xs text-muted">{d.notes}</p>}
+                            {d.notes && <p className="mt-1 text-xs text-slate-500">{d.notes}</p>}
                         </div>
                     ))}</div>
                 )}
@@ -267,7 +267,7 @@ export default function VisitDetailPage() {
             {/* Prescriptions Section */}
             <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">{tr("prescriptions")} ({prescriptions.length})</h3>
+                    <h3 className="text-base font-bold text-primary">{tr("prescriptions")} <span className="text-slate-400 font-normal text-sm">({prescriptions.length})</span></h3>
                     {canEdit && <button className="text-primary text-sm hover:underline" onClick={() => { setShowPrescription(true); setFormError(null); }}>+ {tr("addPrescription")}</button>}
                 </div>
                 {showPrescription && (
@@ -285,15 +285,15 @@ export default function VisitDetailPage() {
                         <div className="flex gap-2 justify-end"><button type="button" className="text-sm text-muted" onClick={() => setShowPrescription(false)}>{tr("cancel")}</button><button className="btn-primary text-sm" disabled={submitting}>{submitting ? tr("adding") : tr("add")}</button></div>
                     </form>
                 )}
-                {prescriptions.length === 0 ? <p className="text-sm text-muted">{tr("noPrescriptionsRecorded")}</p> : (
+                {prescriptions.length === 0 ? <p className="text-sm italic text-slate-400">{tr("noPrescriptionsRecorded")}</p> : (
                     <div className="space-y-2">{prescriptions.map((p) => (
                         <div key={p.prescription_id} className="rounded-md border border-border px-3 py-2 text-sm">
                             <div className="flex items-center gap-2">
-                                <span className="font-medium">{p.medication_name}</span>
-                                <span className="text-xs text-muted">{p.dosage} — {p.frequency}</span>
-                                {p.duration_days && <span className="text-xs text-muted">({p.duration_days}d)</span>}
+                                <span className="font-semibold text-slate-800">{p.medication_name}</span>
+                                <span className="text-xs text-slate-400">{p.dosage} — {p.frequency}</span>
+                                {p.duration_days && <span className="text-xs text-slate-400">({p.duration_days}d)</span>}
                             </div>
-                            {p.instructions && <p className="mt-1 text-xs text-muted">{p.instructions}</p>}
+                            {p.instructions && <p className="mt-1 text-xs text-slate-500">{p.instructions}</p>}
                         </div>
                     ))}</div>
                 )}

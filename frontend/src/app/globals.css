@@ -1,3 +1,25 @@
+/* Custom style for navbar language select */
+.navbar-lang-select {
+  background: #f8fafc;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 38px;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+.navbar-lang-select:focus {
+  border: 1.5px solid #4f6ef7;
+  outline: none;
+  box-shadow: 0 0 0 2px #4f6ef733;
+}
+.navbar-lang-select option {
+  color: #1e293b;
+  background: #fff;
+  font-weight: 600;
+}
 @import "tailwindcss";
 
 /* ═══════════════════════════════════════════
@@ -33,7 +55,27 @@
   --color-card: var(--card);
   --color-muted: var(--muted);
   --color-primary: var(--primary);
+  --color-primary-50: #f0f9ff;
+  --color-primary-100: #e0f2fe;
+  --color-primary-200: #bae6fd;
+  --color-primary-300: #7dd3fc;
+  --color-primary-400: #38bdf8;
+  --color-primary-500: #0ea5e9;
+  --color-primary-600: #0284c7;
+  --color-primary-700: #0369a1;
+  --color-primary-800: #075985;
+  --color-primary-900: #0c4a6e;
   --color-primary-strong: var(--primary-strong);
+  --color-secondary-50: #ecfeff;
+  --color-secondary-100: #cffafe;
+  --color-secondary-200: #a5f3fc;
+  --color-secondary-300: #67e8f9;
+  --color-secondary-400: #22d3ee;
+  --color-secondary-500: #06b6d4;
+  --color-secondary-600: #0891b2;
+  --color-secondary-700: #0e7490;
+  --color-secondary-800: #155e75;
+  --color-secondary-900: #164e63;
   --color-border: var(--border);
   --color-success: var(--success);
   --color-warning: var(--warning);
@@ -139,6 +181,155 @@ body {
 }
 
 a { color: inherit; text-decoration: none; }
+
+.landing-theme {
+  --color-primary-50: #f0f9ff;
+  --color-primary-100: #e0f2fe;
+  --color-primary-200: #bae6fd;
+  --color-primary-300: #7dd3fc;
+  --color-primary-400: #38bdf8;
+  --color-primary-500: #0ea5e9;
+  --color-primary-600: #0284c7;
+  --color-primary-700: #0369a1;
+  --color-primary-800: #075985;
+  --color-primary-900: #0c4a6e;
+  --color-secondary-50: #ecfeff;
+  --color-secondary-100: #cffafe;
+  --color-secondary-200: #a5f3fc;
+  --color-secondary-300: #67e8f9;
+  --color-secondary-400: #22d3ee;
+  --color-secondary-500: #06b6d4;
+  --color-secondary-600: #0891b2;
+  --color-secondary-700: #0e7490;
+  --color-secondary-800: #155e75;
+  --color-secondary-900: #164e63;
+}
+
+.landing-theme .glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.landing-theme .bg-grid-pattern {
+  background-image:
+    linear-gradient(to right, rgba(226, 232, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(226, 232, 240, 0.5) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+@keyframes landing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes landing-blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+
+@keyframes landing-gradient {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.landing-theme .animate-float {
+  animation: landing-float 6s ease-in-out infinite;
+}
+
+.landing-theme .animate-float-delayed {
+  animation: landing-float 6s ease-in-out 3s infinite;
+}
+
+.landing-theme .animate-blob {
+  animation: landing-blob 7s infinite;
+}
+
+.landing-theme .animation-delay-0 {
+  animation-delay: 0s;
+}
+
+.landing-theme .animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.landing-theme .animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+.landing-theme .animate-gradient {
+  animation: landing-gradient 3s ease infinite;
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.delay-1000 {
+  animation-delay: 1s;
+}
+
+.patient-shell .gradient-text, .gradient-text {
+  background-image: linear-gradient(90deg, #60a5fa 0%, #06b6d4 100%);
+}
+
+.patient-shell {
+  --foreground: #0f172a;
+  --muted: #56657c;
+  --border: rgba(2, 132, 199, 0.14);
+}
+
+.patient-shell .card {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 10px 40px rgba(2, 132, 199, 0.08),
+    0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.patient-shell .card:hover {
+  box-shadow:
+    0 14px 46px rgba(2, 132, 199, 0.1),
+    0 4px 10px rgba(15, 23, 42, 0.04);
+}
+
+.patient-shell .input {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(14, 165, 233, 0.14);
+}
+
+.patient-shell .input:focus {
+  border-color: rgba(14, 165, 233, 0.45);
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.08);
+}
+
+.patient-shell .text-muted,
+.patient-shell .text-slate-400 {
+  color: #64748b !important;
+}
+
+.patient-shell .text-slate-500 {
+  color: #475569 !important;
+}
+
+.patient-shell .text-slate-600 {
+  color: #334155 !important;
+}
+
+.patient-shell .text-slate-700 {
+  color: #1e293b !important;
+}
+
+.patient-shell .badge {
+  color: #0f172a;
+}
 
 /* ── Glass Card ── */
 
@@ -266,9 +457,18 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--radius-sm);
   padding: 0.65rem 0.85rem;
   background: var(--card-solid);
-  color: inherit;
+  color: var(--foreground);
   font-size: 0.875rem;
   transition: all 0.25s ease;
+}
+
+.patient-shell .input {
+  color: #1e293b;
+}
+
+.patient-shell .input::placeholder {
+  color: #94a3b8;
+  opacity: 1;
 }
 
 .input:focus {
@@ -339,7 +539,7 @@ a { color: inherit; text-decoration: none; }
 
 .table-header {
   border-bottom: 1.5px solid var(--border);
-  background: var(--background);
+  background: var(--primary);
 }
 
 .table-header th {
@@ -349,7 +549,7 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--muted);
+  color: #ffffff;
 }
 
 .table-row {
@@ -362,12 +562,14 @@ a { color: inherit; text-decoration: none; }
 }
 
 .table-row:hover {
-  background: rgba(79, 110, 247, 0.03);
+  background: rgba(79, 110, 247, 0.05);
 }
 
 .table-row td {
   padding: 0.75rem 1rem;
   font-size: 0.875rem;
+  color: #1e293b;
+  font-weight: 500;
 }
 
 /* ── Family Tree ── */

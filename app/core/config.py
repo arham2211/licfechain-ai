@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     ROBOFLOW_ORAL_MODEL_ID: str = "oral-cancer-up2pr"
     ROBOFLOW_ORAL_MODEL_VERSION: str = "1"
 
+    # SMTP Email (for sending credentials to admin)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    NOTIFICATION_EMAIL: str = "arhamaffan22@gmail.com"
+
 
 @lru_cache
 def get_settings() -> Settings:

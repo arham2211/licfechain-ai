@@ -23,8 +23,8 @@ export function PageHeader({
           </div>
         )}
         <div>
-          <h1 className="text-xl font-bold tracking-tight">{title}</h1>
-          {subtitle && <p className="mt-0.5 text-sm text-muted">{subtitle}</p>}
+          <h1 className="text-xl font-extrabold tracking-tight text-slate-900 drop-shadow-sm">{title}</h1>
+          {subtitle && <p className="mt-0.5 text-sm font-semibold text-slate-700 drop-shadow-sm">{subtitle}</p>}
         </div>
       </div>
       {right && <div className="relative z-50 mt-3 md:mt-0">{right}</div>}

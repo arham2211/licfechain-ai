@@ -25,7 +25,11 @@ def get_application() -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware)
 
     # CORS
-    allow_origins = settings.BACKEND_CORS_ORIGINS if settings.BACKEND_CORS_ORIGINS else ["http://localhost:3000"]
+    allow_origins = settings.BACKEND_CORS_ORIGINS if settings.BACKEND_CORS_ORIGINS else [
+        "http://localhost:3000",
+        "http://0.0.0.0:3000",
+        "http://127.0.0.1:3000",
+    ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow_origins,
@@ -38,5 +42,4 @@ def get_application() -> FastAPI:
 
 
 app = get_application()
-
 

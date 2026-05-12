@@ -1,785 +1,108 @@
 LifeChain AI
-Final Year Project Proposal
-Session FALL 2025
-BS in AI/CS
+Current Project Summary
+
+LifeChain AI is a healthcare records and clinical intelligence platform built to unify patient data,
+clinical workflows, laboratory reporting, family-history context, and AI-assisted disease tracking
+in one system.
+
+This repository contains the active implementation of the platform rather than the original FYP
+proposal draft. The codebase is split into a FastAPI backend, a Next.js frontend, model training
+utilities, trained model artifacts, and supporting documentation.
+
+Project goals
+
+- Maintain a single longitudinal patient record across visits, reports, diagnoses, prescriptions,
+  and disease progression history
+- Support separate role-based workflows for admins, doctors, patients, and labs
+- Enable chronic disease monitoring from structured lab values
+- Support oral cancer image screening and progression tracking
+- Link patient family relationships for hereditary context and disease-history analysis
+- Provide multilingual utilities and an extensible AI-assisted healthcare workflow
+
+Current implemented scope
+
+1. Patient management
+   - create, update, search, and view patient profiles
+   - unique patient identity tied to the rest of the platform
+   - family relationship graph and family disease history access
+
+2. Doctor workflows
+   - create doctor profiles
+   - manage visits, symptoms, diagnoses, and prescriptions
+   - review patient history and progression reports
+
+3. Lab workflows
+   - create lab profiles and reports
+   - add structured test results from supported reference ranges
+   - mark reports as completed to trigger downstream progression and diagnosis updates
+   - upload oral scan images and store screening results
+
+4. AI and analytics
+   - multi-disease structured inference support
+   - progression timeline and forecast reporting
+   - oral cancer image-based detection workflow
+   - model training and evaluation utilities under model_training/
+
+5. Platform services
+   - JWT authentication and role checks
+   - translation endpoints
+   - SMTP-based credential email delivery for newly created doctor and lab accounts
+
+Technology stack
+
+- Backend: FastAPI, SQLAlchemy, Alembic, PostgreSQL, Pydantic
+- Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS v4, Framer Motion
+- AI/ML: TensorFlow, PyTorch, XGBoost, scikit-learn, Roboflow integrations
+- Dev runtime: Docker Compose with separate backend and frontend containers
+
+Important directories
+
+- app/ - backend application code
+- frontend/ - Next.js frontend
+- migrations/ - Alembic migrations
+- model_training/ - training and model test scripts
+- models/ - trained model artifacts and feature configs
+- docs/ - supplementary documentation
+- tests/ - backend tests
+
+Local development defaults
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+- API docs: http://localhost:8000/docs
+
+Main API groups
+
+- /api/v1/auth
+- /api/v1/health
+- /api/v1/patients
+- /api/v1/doctors
+- /api/v1/visits
+- /api/v1/labs
+- /api/v1/ml
+- /api/v1/ml/oral-cancer
+- /api/v1/reports
+- /api/v1/proposal
+- /api/v1/translation
+
+Current disease focus
+
+- diabetes
+- chronic kidney disease
+- iron deficiency anemia
+- parathyroid disorders
+- oral cancer
+
+Operational notes
+
+- The current source of truth is the running code, not older proposal-era documents.
+- Environment variables are loaded from .env by the backend.
+- Gmail SMTP requires an App Password for successful credential delivery.
+- Some older docs may describe earlier APIs or proposal placeholders; verify against code when in doubt.
+
+Recommended starting points
 
-Project Supervisor
-Dr. Shahbaz Siddiqui
-
-Fast School of Computing
-Fast National University, Karachi Campus
-23 September 2025
-
-Project Registration
-Project ID (for office use)
-Type of project
-
-[ ✓ ] Traditional
-
-Nature of project
-
-[ ✓ ] Development
-
-Sustainable Development
-Goals(SDGs)
-
-[ ] Industrial
-
-[ ] Continuing
-
-[ ] Research & Development
-
-[ ] Research
-
-[ ✓ ] Good Health and Well-Being
-
-[ ] Quality Education
-
-[ ✓ ] Industry, Innovation, and Infrastructure
-
-[ ] Gender Equality
-
-[ ] Decent Work and Economic Growth
-
-[ ] Climate Action
-
-[ ✓ ] Artificial Intelligence (AI) [ ✓ ] Data Science and Analytics
-[ ] Internet of Things (IoT)
-Area of specialization
-
-[ ] Blockchain
-
-[ ] Mobile App Development
-Cybersecurity
-[ ] Game Development
-
-[ ✓ ] Web Development
-
-[ ]
-
-[ ✓ ] Natural Language Processing (NLP)
-
-[ ] Other
-Project Group Members
-Sr.#
-
-Reg. #
-
-Student Name
-
-CGPA
-
-Email ID
-
-Phone #
-
-(i)
-
-22K-4026
-
-Abbas Ghori
-
-3.58
-
-k224026@nu.edu.pk
-
-03032008961
-
-(ii)
-
-22K-4118
-
-M. Arish Khan
-
-3.00
-
-k224118@nu.edu.pk
-
-03308466382
-
-(iii)
-
-22K-4136
-
-Arham Affan
-
-3.41
-
-k224136@nu.edu.pk
-
-03002919866
-
-Signature
-
-Declaration: FYP group members have cleared all prerequisite courses For FYP-I as per their degree requirements.
-
-2 of 16
-
-Abstract
-The current landscape of medical record-keeping is fragmented, siloed, and heavily dependent
-on disparate systems and physical documents. This decentralization results in incomplete
-patient histories, places an unreliable burden on patient memory, and creates barriers to
-longitudinal monitoring and international healthcare delivery. This project proposes the
-development of a unified global healthcare ecosystem designed to consolidate a patient’s entire
-medical journey into a single, secure, and accessible digital record.
-From birth, each individual will be assigned a Unique Patient ID, forming the foundation of a
-lifelong health repository. All medical reports, regardless of hospital, clinic, or country of
-origin, will be digitized and stored in a standardized format. An advanced OCR and data
-extraction model will structure existing PDF reports seamlessly. If a hospital is subscribed to
-the system, healthcare staff will input data directly, while in cases where institutions are not
-yet integrated, patients will retain the ability to upload their own report PDFs, ensuring
-continuity of records across all contexts.
-A novel feature of this platform is the integration of a dynamic family tree. By linking the
-Unique Patient IDs of blood relatives, the system can analyze familial medical histories to
-identify genetic predispositions, prompting clinicians to recommend preventative screenings
-and tests. Real-time translation services will extend global accessibility, breaking down
-language barriers in cross-border healthcare.
-The initial pilot phase will focus on the diagnosis and monitoring of Diabetes, Chronic Kidney
-Disease (CKD), Parathyroid Disorders, and Iron Deficiency Anemia, while also incorporating
-the detection and progression tracking of dental diseases using deep learning models. Both
-patients and clinicians will have access to a shared dashboard presenting health progress,
-laboratory trends, dental lesion monitoring, medication details, and treatment history. This dual
-view fosters proactive engagement, continuous monitoring, and timely interventions, laying
-the foundation for globally connected, data-driven healthcare.
-
-1 Introduction
-Project Title: LifeChain AI
-A Unified Global Healthcare Ecosystem for Lifelong Medical Record Management and
-Genetic Risk Analysis
-
-1.1 Background
-The management of healthcare data in the contemporary world is characterized by significant
-fragmentation. Patient information is typically scattered across numerous healthcare providers,
-stored in incompatible proprietary systems, and often exists only in physical or nonstandardized digital formats such as PDFs. This decentralization creates critical inefficiencies
-and risks: clinicians must make decisions with incomplete patient histories, longitudinal
-tracking of chronic diseases becomes challenging, and the burden of recalling medical history
-falls unreliably upon the patient. In an increasingly globalized world, accessing medical records
-across international borders further presents formidable logistical and linguistic barriers,
-complicating care for travelers, expatriates, and individuals seeking specialized treatment
-abroad.
-3 of 16
-
-A major gap in current systems is the absence of a unified, data-driven approach to lifelong
-health monitoring and preventative care. Existing practices such as family history assessment
-are typically manual and dependent on patient knowledge, leaving significant room for error
-and missed opportunities. Similarly, chronic conditions such as Diabetes, Chronic Kidney
-Disease (CKD), Parathyroid Disorders, and Iron Deficiency Anemia often require continuous
-monitoring through laboratory data, yet current infrastructures rarely support seamless
-integration of longitudinal reports across institutions. Dental diseases, despite being highly
-prevalent and impactful on systemic health, also lack consistent digital monitoring tools
-capable of detecting and tracking progression over time.
-This project directly addresses these shortcomings by proposing an integrated digital ecosystem
-that consolidates a patient’s entire medical journey, from birth to death, into a single, lifelong
-record. By combining automated report digitization, dynamic family tree analysis for
-hereditary risk prediction, and AI-driven monitoring of chronic and dental conditions, the
-system aims to transform fragmented, reactive healthcare into a globally connected, proactive,
-and data-driven model of care.
-
-1.2 Project Objectives
-The primary objective of this project is to design, develop, and evaluate a proof-of-concept for
-a unified global healthcare platform. The system will be built upon the principle of a single,
-lifelong medical record for every individual, securely accessible from anywhere in the world.
-The specific goals are as follows:
-● To establish a system architecture centered around a Unique Patient ID, serving as a
-universal key for all medical records.
-● To design and implement a Unified Medical Report Structure that standardizes data
-from disparate sources and ensures interoperability across hospitals and clinics.
-● To develop an automated data ingestion pipeline using OCR and AI models to extract
-and structure information from PDF-based medical reports, with fallback for manual
-patient uploads when institutions are not directly integrated.
-● To create a Family Tree module that links patient profiles, enabling the identification
-and early flagging of potential hereditary disease risks.
-● To integrate real-time translation services to ensure medical records are accessible
-and understandable across linguistic and regional barriers.
-● To validate the system’s efficacy through a pilot phase that supports the diagnosis
-and monitoring of Diabetes, Chronic Kidney Disease (CKD), Parathyroid
-Disorders, Iron Deficiency Anemia, and dental diseases, leveraging AI-driven
-models for both structured lab-data analysis and deep learning–based dental lesion
-detection and progression tracking.
-● To provide dual dashboards for patients and clinicians, enabling continuous
-monitoring, medication tracking, health trend visualization, and informed decisionmaking throughout the care journey.
-4 of 16
-
-1.3 Methodology and Sub-Tasks
-The project will be executed through the following distinct sub-tasks:
-1. System Architecture and Database Design: The core of the project will be a secure
-and scalable database. A relational or NoSQL schema will be designed to store patient
-demographic data, structured medical reports adhering to the unified format, and graphbased relationships for the family tree module. The architecture will support high
-availability, role-based access, and interoperability across healthcare institutions.
-2. Automated Data Ingestion: An intelligent data extraction module will be developed
-to convert unstructured medical reports into structured formats. Optical Character
-Recognition (OCR) will digitize text from PDFs, while custom-trained NLP and
-computer vision models will identify, classify, and map relevant information such as
-diagnoses, laboratory values, medications, and physician notes into the unified report
-structure.
-3. Family Tree and Genetic Risk Algorithm: A relationship graph will be implemented
-by linking Unique Patient IDs across familial connections (e.g., parent–child). An
-automated algorithm will traverse this graph and, upon detection of a significant
-diagnosis, evaluate hereditary risk for related profiles. The module will generate alerts
-or recommendations for preventative screenings based on defined clinical guidelines.
-4. Pilot Applications for Validation: The system will initially be validated through
-applications in both chronic and dental disease monitoring. For chronic conditions such
-as Diabetes, CKD, Parathyroid Disorders, and Iron Deficiency Anemia, the platform
-will track laboratory markers over time to classify patient status as “stable,”
-“improving,” or “worsening.” For dental diseases, deep learning models will be
-employed to detect lesions from oral images and monitor their progression
-longitudinally. This dual focus will demonstrate the system’s capacity to handle both
-text-based medical data and image-assisted disease tracking.
-5. Global Access and Translation: A web-based interface will provide access to medical
-data for both patients and clinicians. Real-time translation services will be integrated to
-ensure accessibility across languages, enabling seamless international healthcare
-delivery.
-
-2 Success Criterion
-The successful completion of this project will be evaluated based on a primary, verifiable
-success criterion that is both comprehensive and achievable. This ensures a clear baseline for
-project success, with additional achievements demonstrating the system’s potential to exceed
-initial expectations.
-The primary success criterion is the delivery of a functional, end-to-end prototype that
-demonstrates the core workflow of the proposed platform. This criterion will be considered
-met upon the successful demonstration of the following capabilities:
-1. Patient and Record Creation: A user can create a new patient profile, which is
-assigned a Unique Patient ID, and upload a sample PDF medical report.
-
-5 of 16
-
-2. Automated Data Ingestion: The system correctly processes the uploaded PDF,
-extracts key information using OCR and NLP models, and populates the Unified
-Medical Report Structure with relevant variables such as diagnoses, laboratory markers,
-and physician notes.
-3. Family Tree Risk Flagging: Linking the new patient to an existing relative (e.g., a
-parent) and adding a predefined hereditary condition to the parent’s record
-automatically triggers a risk notification for the patient, confirming the correct
-functioning of the genetic risk algorithm.
-4. Pilot Application Functionality: The system demonstrates monitoring in both
-domains of focus. For chronic diseases such as Diabetes, CKD, Parathyroid Disorders,
-and Iron Deficiency Anemia, the system accurately displays laboratory trends and
-classifies the patient’s condition as “improving,” “stable,” or “worsening.” For dental
-diseases, the platform associates oral images with the patient’s record and incorporates
-the AI model’s output for lesion detection and progression status.
-This core functionality will serve as the benchmark for project completion. Quantitative
-performance metrics, such as OCR extraction accuracy, classification performance for chronic
-disease status, and the precision/recall of AI-based dental lesion detection, will be documented
-in the dissertation as evidence of the system’s robustness, representing achievements that
-exceed the baseline success criterion.
-
-3 Related works
-Health record fragmentation and EHR interoperability are widely recognized problems;
-systematic reviews show interoperability reduces care duplication and safety risks but that
-heterogeneous formats and semantics remain major roadblocks [1]. Converting legacy paper
-reports and PDFs into structured, queryable records is an active research area; state-of-the-art
-pipelines now combine layout-aware OCR with domain-specific NLP (NER and relation
-extraction) to achieve much higher extraction accuracy than OCR alone [2][9].
-Recent work on automated family history analysis demonstrates that pedigree-aware
-pipelines and graph-based representations can improve risk prediction for hereditary
-conditions, motivating automated family-tree linking and risk flagging in LifeChain AI
-[3][4].
-For the dental pilot, there exist curated oral-cavity image datasets and histopathology datasets
-(for example, the Sri Lanka annotated oral cavity image collection and the NDB-UFES
-dataset) that have been used to train and benchmark CNN models for lesion detection and
-classification; these resources support both detection and longitudinal progression tasks
-[5][6][7].
-While components for interoperability, document digitization, family-history inference, and
-image-based disease detection exist, an integrated, lifelong patient record that links relatives,
-supports multilingual access, and combines imaging models with structured report ingestion
-remains an open practical challenge — exactly the gap this project aims to address [8]
-
-6 of 16
-
-4 Project Rationale
-The fundamental purpose of this project is to address a critical and pervasive inefficiency in
-modern healthcare: the fragmentation of patient medical data. Patient records are currently
-scattered across institutions, stored in incompatible formats, and often remain in paper-based
-or non-standardized digital forms such as PDFs. This fragmentation is more than a logistical
-inconvenience—it directly affects patient safety, treatment efficacy, and healthcare costs.
-Incomplete histories increase the risk of misdiagnosis, adverse drug interactions, and redundant
-testing, while making the longitudinal monitoring of chronic diseases nearly impossible.
-This project envisions a patient-centric healthcare model in which every individual’s complete,
-lifelong medical history is consolidated into a single, secure, and universally accessible record.
-By integrating automated data ingestion, structured storage, and family-tree based genetic risk
-analysis, the system will not only provide continuity of care but also enable early identification
-of hereditary risks. Such proactive insights can drive timely interventions and preventative
-strategies, addressing gaps that traditional healthcare infrastructures are unable to cover
-effectively.
-The rationale for focusing initially on Diabetes, Chronic Kidney Disease (CKD), Parathyroid
-Disorders, Iron Deficiency Anemia, and dental diseases lies in their high prevalence, long-term
-monitoring requirements, and reliance on structured laboratory or clinical data. These
-conditions present a realistic yet impactful scope for demonstrating the system’s capability to
-unify fragmented medical information into actionable insights.
-Our motivation for undertaking this project is twofold. Firstly, it represents an opportunity to
-apply advanced principles of computer science—particularly artificial intelligence, natural
-language processing, computer vision, and scalable system architecture—to a real-world
-challenge with global societal impact. Secondly, it offers a chance to gain practical experience
-in tackling a multi-faceted technical problem, combining deep learning, healthcare informatics,
-research, and project management into a cohesive, solution-oriented approach.
-
-4.1 Aims and Objectives
-The primary aim of this project is to design, develop, and evaluate a proof-of-concept for a
-unified global healthcare platform. The system will be built upon the principle of a single,
-lifelong medical record for every individual, securely accessible from anywhere in the world.
-The specific, focused objectives to achieve this aim are as follows:
-1. To establish a system architecture centered around a Unique Patient ID, serving as a
-universal key for all medical records and enabling lifelong continuity of data.
-2. To design and implement a Unified Medical Report Structure that standardizes
-information from disparate sources and ensures interoperability across hospitals and
-clinics.
-3. To develop an automated data ingestion pipeline using OCR, NLP, and computer
-vision models to extract and structure information from PDF-based medical reports,
-with fallback options for manual patient uploads when direct hospital integration is
-
-7 of 16
-
-unavailable.
-4. To create a Family Tree module that links patient profiles and automatically flags
-potential hereditary disease risks through a graph-based relationship algorithm.
-5. To integrate real-time translation to ensure medical reports are understandable across
-linguistic and regional barriers, enabling seamless international use.
-6. To validate the system’s efficacy through a pilot application that supports the
-diagnosis and monitoring of chronic diseases such as Diabetes, CKD, Parathyroid
-Disorders, and Iron Deficiency Anemia, while also incorporating dental disease
-detection and progression tracking using AI-driven deep learning models.
-
-4.2 Scope of the Project
-The scope of this project is carefully defined to ensure the delivery of a functional and testable
-prototype within the academic timeframe. The primary focus is on demonstrating the core
-functionalities of the unified healthcare system and proving the viability of the proposed
-concept.
-In-Scope Deliverables:
-● Functional Software Prototype: A proof-of-concept system including a back-end
-database, server-side logic, and a basic front-end interface to demonstrate patient
-registration, record access, and system workflow.
-● Unique Patient ID and Record Management: Creation and management of patient
-profiles using a universal ID to consolidate medical history across multiple records.
-● Automated Data Extraction Module: A working pipeline capable of processing
-sample PDF medical reports (including dental and general medical records) using
-OCR and NLP techniques, and populating structured database entries.
-● Hereditary Risk Alert System: A family-tree-based module that links patient
-profiles and triggers risk notifications for hereditary conditions using predefined rules
-and algorithms.
-● AI Models for Pilot Applications:
-○ A CNN-based dental model for diagnosis (detection) and progression
-monitoring of oral diseases.
-○ A set of models for chronic diseases (Diabetes, Chronic Kidney Disease,
-Parathyroid Disorders, and Iron Deficiency Anemia), focusing on early
-detection and disease progression monitoring.
-● Project Dissertation: A comprehensive academic document covering the project’s
-background, motivation, methodology, system design, implementation details, results,
-evaluation, and conclusion.
-
-8 of 16
-
-Out-of-Scope:
-●
-
-Commercial Deployment: This project is a proof-of-concept and will not be developed
-into a production-ready, commercially deployable application.
-
-●
-
-Regulatory Compliance: The prototype will not be compliant with specific medical
-data regulations (e.g., HIPAA, GDPR). While security principles will be considered in
-the design, a full compliance audit is outside the scope.
-
-●
-
-Comprehensive Medical Coverage: The pilot is limited to dental diseases. The system
-will not be populated with data or AI models for other medical specialties.
-
-●
-
-Real-time Clinical Integration: The system will not be integrated with any live
-hospital or clinical information systems.
-
-●
-
-Project Deadlines and Costs: While project management principles will be applied, a
-formal cost analysis is not a required deliverable for this academic project.
-
-5 Proposed Methodology and Architecture
-This section provides a detailed overview of the methodology, system architecture, and
-technical procedures that will be employed to develop the LifeChain AI. Our approach is
-designed to be systematic and iterative, ensuring that each objective outlined in the project
-scope is met efficiently.
-
-5.1 Development Methodology
-To manage the LifeChain AI project effectively and accommodate the iterative nature of
-research and development, an Agile development methodology will be employed, specifically
-using a simplified Scrum framework. This methodology provides flexibility, promotes
-incremental progress, and ensures continuous integration of feedback.
-The project will be structured into two-week sprints, with each sprint dedicated to the
-development of a specific, demonstrable feature.
-● Sprint Planning: At the beginning of each sprint, key tasks will be selected from the
-project backlog, prioritizing features that align with the system’s core objectives.
-● Daily Stand-ups: Short daily meetings will be conducted to maintain
-synchronization, track progress, and resolve potential blockers quickly.
-● Sprint Review: At the end of each sprint, the implemented functionality will be
-demonstrated to the project supervisor, with feedback integrated into the following
-sprint cycle.
-This iterative process ensures that the final prototype remains aligned with the project’s aims,
-is thoroughly tested at each stage, and evolves into a robust and functional system.
-Alongside the management framework, the technical methodology will follow a layered,
-modular approach:
-
-9 of 16
-
-● System Architecture Design: Establishing the overall architecture, including
-database schema, patient ID framework, and system APIs.
-● Data Ingestion and Processing: Developing the OCR/NLP pipeline for automated
-extraction of structured data from medical report PDFs.
-● AI Model Development: Training and validating CNN and deep learning models for
-both dental disease detection and chronic condition prediction.
-● Integration and Testing: Incrementally integrating modules into the prototype,
-followed by unit testing, integration testing, and evaluation against benchmark
-metrics.
-● Pilot Evaluation: Demonstrating the end-to-end workflow of the system using dental
-and chronic disease datasets to validate feasibility.
-This combination of Agile project management and modular technical methodology
-ensures that LifeChain AI is developed systematically, with measurable progress and
-adaptability to challenges.
-
-5.2 System Architecture
-The proposed LifeChain AI system will be implemented using a modern Three-Tier
-Architecture, which separates the application into distinct logical and physical layers. This
-architectural approach provides scalability, maintainability, and security, ensuring that the
-system can evolve beyond the proof-of-concept stage into a deployable solution.
-1. Presentation Tier (Frontend):
-○ This tier provides the user interface (UI) through which clinicians, patients,
-and administrators interact with the system.
-○ A responsive, web-based application will be developed to ensure
-accessibility across desktops, tablets, and mobile devices.
-○ The UI will allow users to register patients, upload medical reports, visualize
-family trees, and review AI-driven diagnostic insights.
-○ Security features such as role-based access control and encrypted
-communication (HTTPS) will be enforced at this level.
-2. Application Tier (Backend):
-○ This tier forms the core logic of the system. It will be implemented as a highperformance RESTful API (or GraphQL, depending on implementation
-needs).
-○ Responsibilities include:
-
-10 of 16
-
-■ User Authentication and Authorization
-■ Data Ingestion and Processing (OCR, NLP, and computer vision
-pipelines)
-■ Business Logic for managing patient records, risk analysis, and alerts
-■ Integration with AI Models for disease detection and progression
-monitoring
-■ Translation Services via integration with third-party APIs
-○ The backend will be designed to ensure modularity, making it straightforward
-to extend or replace components as new datasets and models are introduced.
-3. Data Tier (Database):
-○ This tier provides persistent and secure storage of all system data.
-○ A relational database (such as PostgreSQL or MySQL) will be used to
-manage structured patient data, medical records, and family tree relationships.
-○ For graph-based operations, such as efficient traversal of hereditary links, a
-graph database (e.g., Neo4j) may be used in parallel or integrated with the
-relational schema.
-○ All sensitive data will be stored in compliance with healthcare data security
-standards, with encryption at rest and access control policies applied.
-Together, these three tiers form a scalable and secure ecosystem. The frontend communicates
-with the backend via secure APIs, the backend enforces logic and integrates AI/translation
-services, and the database provides reliable storage and retrieval. This layered design ensures
-the system can be maintained, extended, and scaled as the project evolves.
-
-11 of 16
-
-Fig. 1.
-
-System Architecture Diagram
-
-6 Individual Tasks
-TABLE I.
-
-PROJECT TIMELINE
-
-Team Member
-
-Activity
-
-Tentative Date
-
-Arham, Arish, Abbas
-
-Project
-kickoff,
-requirement
-refinement, sprint planning setup
-
-Oct 1, 2025
-
-Abbas
-
-Literature review and dataset Oct 8, 2025
-familiarization (Sri Lanka Oral
-Cavity, NDB-UFES)
-
-Abbas, Arish
-
-Tools & environment setup (GitHub, Oct 8, 2025
-FastAPI, React, PostgreSQL, ML
-frameworks)
-
-Arham
-
-System architecture design (3-tier Oct 22, 2025
-architecture, UML diagrams)
-
-Abbas
-
-Database schema & ERD design Oct 29, 2025
-(Unique Patient ID, Family Tree
-schema)
-
-Arish
-
-Frontend wireframes & UI/UX Oct 29, 2025
-mockups (React + Tailwind)
-
-12 of 16
-
-Arham
-
-Backend API (FastAPI endpoints: Nov 10, 2025
-patient creation, record upload)
-
-Abbas
-
-Database integration
-management
-
-Arish
-
-Frontend prototype (basic forms: Nov 20, 2025
-patient creation, PDF upload)
-
-Arham
-
-OCR pipeline: integrate Google Nov 28, 2025
-Vision API / LLaMA OCR
-
-Arham, Abbas
-
-NLP/structuring
-pipeline
-LangChain for report fields
-
-Abbas
-
-CNN model training for dental lesion Dec 15, 2025
-detection (Sri Lanka dataset)
-
-Abbas, Arish
-
-CNN model training for progression Dec 22, 2025
-monitoring (NDB-UFES dataset)
-
-Arish
-
-Family tree graph module (patient Jan 10, 2026
-linking, traversal logic)
-
-Arish
-
-Risk flagging rules & automated Jan 20, 2026
-alerts
-
-Arham
-
-Translation API integration (Google Feb 1, 2026
-Translate API)
-
-Arish
-
-UI updates for multilingual support
-
-Arham, Arish
-
-Full-stack integration (backend + Feb 15, 2026
-frontend + AI modules)
-
-Abbas
-
-Unit testing (OCR, database, family Feb 20, 2026
-tree, CNN outputs)
-
-All
-
-System
-testing
-workflow)
-
-&
-
-record Nov 15, 2025
-
-with Dec 5, 2025
-
-Feb 5, 2026
-
-(end-to-end Mar 1, 2026
-
-Abbas (lead), with inputs Dissertation writing (background, Mar 20, 2026
-from Arham & Arish
-methodology, results)
-
-13 of 16
-
-Arham, Abbas
-
-Prototype refinement (bug fixes, UI Apr 1, 2026
-polish)
-
-All
-
-Final evaluation & supervisor review Apr 25, 2026
-
-All
-
-Final report, presentation prep, and May 10, 2026
-submission
-
-7 Gantt Chart
-
-Fig. 2.
-
-Gantt Chart
-
-8 Tools and Technologies
-This section outlines the specific tools, programming languages, frameworks, and platforms
-that will be utilized for the development of the LifeChain AI project, corresponding to the
-three-tier architecture previously defined.
-●
-
-Presentation Tier (Frontend):
-o
-
-Framework: React.js will be used for building the user interface due to its
-component-based architecture, extensive community support, and rich
-ecosystem of libraries.
-
-o
-
-Language: TypeScript will be used alongside JavaScript to ensure type safety
-and improve code maintainability.
-
-o
-
-Styling: Tailwind CSS will be employed for its utility-first approach to styling,
-enabling rapid and consistent UI development.
-
-14 of 16
-
-●
-
-●
-
-Application Tier (Backend):
-o
-
-Framework: Python with the FastAPI framework will be the primary choice
-for the backend. FastAPI is selected for its high performance, automatic
-interactive API documentation, and modern Python type-hinting features, which
-aligns well with our AI/ML stack.
-
-o
-
-API: A RESTful API will be designed to facilitate communication between the
-frontend and backend services.
-
-Data Tier (Database):
-o
-
-●
-
-●
-
-Database: PostgreSQL will be used as the primary relational database. It is
-chosen for its robustness, reliability, and powerful features, including support
-for complex queries and extensions like PostGIS for potential future geospatial
-data. Its structured nature is well-suited for storing patient data, unified reports,
-and managing relational links for the family tree.
-
-AI and Machine Learning:
-o
-
-Language: Python will be the language of choice for all AI-related tasks.
-
-o
-
-OCR and Data Extraction: Instead of a traditional OCR engine, we will
-leverage state-of-the-art vision models like the Google Vision API and
-multimodal models such as Llama OCR for superior accuracy in extracting text
-and understanding the layout of complex medical documents.
-
-o
-
-NLP and Agentic Workflows: LangChain and LangGraph will be used to
-create sophisticated, agentic workflows for processing the extracted text. This
-will allow us to build robust chains that can clean, structure, and analyze the
-data from the medical reports before it is stored in the database.
-
-o
-
-Deep Learning Framework: TensorFlow or PyTorch will be used to build,
-train, and fine-tune the CNN models for the dental disease pilot.
-
-Version Control:
-o
-
-Git and GitHub: All source code will be managed using Git, with a central
-repository hosted on GitHub to facilitate team collaboration.
-
-15 of 16
-
-9 References
-1. E. Li, J. Clarke, H. Ashrafian, A. Darzi, and A. L. Neves, “The impact of electronic health record
-interoperability on safety and quality of care in high-income countries: Systematic review,” Journal of
-Medical Internet Research, vol. 24, no. 9, p. e38144, Sep. 2022, doi: https://doi.org/10.2196/38144.
-2. J. D. Schultz et al., “Extracting Medical Information from Paper COVID-19 Assessment
-Forms,” Applied Clinical Informatics, vol. 12, no. 01, pp. 170–178, Jan. 2021, doi:
-https://doi.org/10.1055/s-0041-1723024.
-3. X. Huang, R. Kleiman, D. Page, and S. Hebbring, “Automated Family Histories Significantly
-Improve Risk Prediction in an EHR,” AMIA Summits on Translational Science Proceedings, vol. 2024,
-p.
-221,
-May
-2024,
-Accessed:
-Sep.
-21,
-2025.
-[Online].
-Available:
-https://pmc.ncbi.nlm.nih.gov/articles/PMC11141855/
-4. Dai X, Karimi S, O'Callaghan N. Identifying Health Risks from Family History: A Survey of Natural
-Language Processing Techniques. arXiv preprint arXiv:2403.09997. 2024 Mar 15.
-https://arxiv.org/abs/2403.09997
-5. N. S. Piyarathne, S. N. Liyanage, R. M. Rasnayaka, P. V. Hettiarachchi, G. A. Devindi, F. B. Francis,
-D. M. Dissanayake, R. A. Ranasinghe, M. B. Pavithya, I. B. Nawinne, and R. G. Ragel, "A
-comprehensive dataset of annotated oral cavity images for diagnosis of oral cancer and oral potentially
-malignant
-disorders,"
-Oral
-Oncology,
-vol.
-156,
-p.
-106946,
-Sep.
-2024.
-https://www.sciencedirect.com/science/article/pii/S1368837524002641
-6. M. C. F. Ribeiro-de-Assis et al., “NDB-UFES: An oral cancer and leukoplakia dataset composed of
-histopathological images and patient data,” Data in Brief, vol. 48, p. 109128, Apr. 2023, doi:
-https://doi.org/10.1016/j.dib.2023.109128.
-7. K. M. Desai et al., “Screening of oral potentially malignant disorders and oral cancer using deep
-learning models,” Scientific Reports, vol. 15, no. 1, May 2025, doi: https://doi.org/10.1038/s41598-02502802-5.
-8. Ademola, C. George, and G. Mapp, “Addressing the interoperability of electronic health records: The
-technical and semantic interoperability, preserving privacy and security framework,” Applied System
-Innovation, vol. 7, no. 6, pp. 116–116, Nov. 2024, doi: https://doi.org/10.3390/asi7060116.
-9. M. Y. Landolsi, L. Hlaoua, and L. Ben Romdhane, “Information extraction from electronic medical
-documents: state of the art and future research directions,” Knowledge and Information Systems, Nov.
-2022, doi: https://doi.org/10.1007/s10115-022-01779-1.
-
-16 of 16
-
-
+- Root README.md for setup, structure, and development workflow
+- app/main.py for backend application startup
+- app/api/v1/api.py for router registration
+- frontend/src/app/ for frontend routes and role-specific pages

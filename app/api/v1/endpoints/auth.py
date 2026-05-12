@@ -5,11 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
+
 from app.api.v1.dependencies import get_current_user, get_current_user_roles, require_roles
 from app.db.session import get_db
 from app.models.auth import User, UserRole
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserProfileResponse
+from app.schemas.auth import LoginRequest, PatientLoginRequest, RegisterRequest, TokenResponse, UserProfileResponse
 from app.services.auth_service import auth_service
+from app.services.email_service import send_credentials_email
 
 
 router = APIRouter()
@@ -73,6 +76,28 @@ async def login(
     user = await auth_service.authenticate_user(db, payload.username_or_email, payload.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    roles = await auth_service.get_user_roles(db, user.user_id)
+    access_token, access_exp = auth_service.create_access_token(user.user_id, roles)
+    refresh_token, refresh_exp = auth_service.create_refresh_token(user.user_id)
+    await auth_service.persist_refresh_token(db, user.user_id, refresh_token, refresh_exp)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=int((access_exp - datetime.now(timezone.utc)).total_seconds()),
+        refresh_expires_in=int((refresh_exp - datetime.now(timezone.utc)).total_seconds()),
+    )
+
+
+@router.post("/login/patient", response_model=TokenResponse)
+async def patient_login(
+    payload: PatientLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    user = await auth_service.authenticate_patient_by_cnic(db, payload.cnic)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid CNIC")
 
     roles = await auth_service.get_user_roles(db, user.user_id)
     access_token, access_exp = auth_service.create_access_token(user.user_id, roles)
@@ -155,3 +180,24 @@ async def list_users(
     result = await db.execute(select(User))
     users = result.scalars().all()
     return {"count": len(users), "users": [{"user_id": str(u.user_id), "username": u.username, "email": u.email} for u in users]}
+
+
+class SendCredentialsRequest(BaseModel):
+    name: str
+    email: str
+    username: str
+    password: str
+    role: str
+
+
+@router.post("/send-credentials", dependencies=[Depends(require_roles("admin"))])
+async def send_credentials_endpoint(payload: SendCredentialsRequest):
+    """Send login credentials for a newly created doctor or lab user to the admin notification email."""
+    sent = await send_credentials_email(
+        name=payload.name,
+        email=payload.email,
+        username=payload.username,
+        password=payload.password,
+        role=payload.role,
+    )
+    return {"sent": sent}

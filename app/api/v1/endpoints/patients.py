@@ -4,12 +4,14 @@ Patient CRUD API endpoints
 
 from typing import List, Optional, Set
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from uuid import UUID
 
 from app.db.session import get_db
 from app.models import Patient, FamilyRelationship, FamilyDiseaseHistory, DiseaseProgression, Diagnosis, DoctorVisit
+from app.models.auth import User
 from app.schemas.patient import (
     Patient as PatientSchema,
     PatientCreate,
@@ -19,7 +21,7 @@ from app.schemas.patient import (
     FamilyRelationshipAutoCreate
 )
 from app.models.family import RelationshipTypeEnum
-from app.api.v1.dependencies import get_translation_language, apply_translation
+from app.api.v1.dependencies import get_translation_language, apply_translation, require_roles
 
 router = APIRouter()
 
@@ -110,6 +112,7 @@ async def get_patient(
 async def update_patient(
     patient_id: UUID,
     patient_update: PatientUpdate,
+    _user=Depends(require_roles("admin")),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a patient"""
@@ -129,11 +132,27 @@ async def update_patient(
             )
             if existing_patient.scalar_one_or_none():
                 raise HTTPException(status_code=400, detail="Patient with this CNIC already exists")
+
+        if patient_update.email and patient_update.email != db_patient.email:
+            existing_user = await db.execute(
+                select(User).where(
+                    User.email == patient_update.email,
+                    User.patient_id != patient_id,
+                )
+            )
+            if existing_user.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="A user with this email already exists")
         
         # Update fields
         update_data = patient_update.dict(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_patient, field, value)
+
+        linked_users_result = await db.execute(select(User).where(User.patient_id == patient_id))
+        linked_users = linked_users_result.scalars().all()
+        if "email" in update_data:
+            for linked_user in linked_users:
+                linked_user.email = db_patient.email or linked_user.email
         
         await db.commit()
         await db.refresh(db_patient)
@@ -149,6 +168,7 @@ async def update_patient(
 @router.delete("/{patient_id}")
 async def delete_patient(
     patient_id: UUID,
+    _user=Depends(require_roles("admin")),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a patient"""
@@ -160,6 +180,10 @@ async def delete_patient(
         
         if not db_patient:
             raise HTTPException(status_code=404, detail="Patient not found")
+
+        linked_users_result = await db.execute(select(User).where(User.patient_id == patient_id))
+        for linked_user in linked_users_result.scalars().all():
+            await db.delete(linked_user)
         
         await db.delete(db_patient)
         await db.commit()
@@ -223,6 +247,104 @@ async def create_family_relationship(
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to create family relationship: {str(e)}")
+
+@router.get("/{patient_id}/family-relationships", response_model=List[FamilyRelationshipSchema])
+async def get_family_relationships(
+    patient_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all family relationships for a patient"""
+    try:
+        patient_result = await db.execute(
+            select(Patient).where(Patient.patient_id == patient_id)
+        )
+        if not patient_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        result = await db.execute(
+            select(FamilyRelationship).where(FamilyRelationship.patient_id == patient_id)
+        )
+        return result.scalars().all()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get family relationships: {str(e)}")
+
+@router.delete("/{patient_id}/family-relationships/{relationship_id}")
+async def delete_family_relationship(
+    patient_id: UUID,
+    relationship_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a family relationship"""
+    try:
+        result = await db.execute(
+            select(FamilyRelationship).where(
+                and_(
+                    FamilyRelationship.id == relationship_id,
+                    FamilyRelationship.patient_id == patient_id
+                )
+            )
+        )
+        rel = result.scalar_one_or_none()
+        if not rel:
+            raise HTTPException(status_code=404, detail="Family relationship not found")
+
+        await db.delete(rel)
+        await db.commit()
+        return {"message": "Family relationship deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete family relationship: {str(e)}")
+
+class KnownDiseaseCreate(PydanticBaseModel):
+    disease_name: str
+    severity: Optional[str] = None   # mild | moderate | severe
+    notes: Optional[str] = None
+
+@router.post("/{patient_id}/known-diseases")
+async def add_known_disease(
+    patient_id: UUID,
+    body: KnownDiseaseCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually record a known disease for a patient (e.g. a family member whose
+    records are not yet in the system). Writes to FamilyDiseaseHistory so the
+    entry is picked up by the family-disease-history traversal endpoint.
+    """
+    try:
+        patient_result = await db.execute(
+            select(Patient).where(Patient.patient_id == patient_id)
+        )
+        if not patient_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        from app.models.family import SeverityEnum
+        severity = None
+        if body.severity and body.severity in [e.value for e in SeverityEnum]:
+            severity = SeverityEnum(body.severity)
+
+        record = FamilyDiseaseHistory(
+            patient_id=patient_id,
+            disease_name=body.disease_name,
+            severity=severity,
+            notes=body.notes,
+        )
+        db.add(record)
+        await db.commit()
+        await db.refresh(record)
+        return {"id": str(record.id), "disease_name": record.disease_name, "message": "Disease recorded successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to record disease: {str(e)}")
 
 @router.post("/{patient_id}/family-relationships/auto")
 async def create_family_relationship_auto(

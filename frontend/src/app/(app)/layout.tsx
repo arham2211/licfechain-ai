@@ -39,13 +39,13 @@ export default function PrivateLayout({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-100 via-blue-50 to-cyan-100">
         <div className="flex flex-col items-center gap-4">
           <div className="relative">
-            <div className="h-12 w-12 rounded-full border-2 border-primary/20" />
-            <Loader2 className="absolute inset-0 h-12 w-12 animate-spin text-primary" />
+            <div className="h-14 w-14 rounded-full border-2 border-blue-200 bg-white/80 shadow-xl" />
+            <Loader2 className="absolute inset-0 h-14 w-14 animate-spin text-blue-500" />
           </div>
-          <p className="text-sm font-medium text-muted">Loading secure workspace...</p>
+          <p className="gradient-text bg-clip-text text-lg font-bold text-transparent drop-shadow-sm">Loading secure workspace...</p>
         </div>
       </div>
     );

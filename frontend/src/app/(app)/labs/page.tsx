@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { FlaskConical, Plus, X, Trash2, CheckCircle, AlertTriangle, Loader2, ImagePlus } from "lucide-react";
+import { FlaskConical, Plus, X, Trash2, CheckCircle, Loader2, ImagePlus, RefreshCw, Pencil } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { api } from "@/lib/api-client";
 import { getUser } from "@/lib/auth-store";
@@ -15,6 +15,7 @@ type Report = { report_id: string; report_type: string; status: string; report_d
 type PatientOption = { patient_id: string; first_name: string; last_name: string; cnic: string };
 type VisitOption = { visit_id: string; visit_date: string; visit_type: string; chief_complaint?: string | null };
 type TestResult = { result_id: string; test_name: string; test_value: number; unit?: string; reference_range_min?: number; reference_range_max?: number; is_abnormal?: boolean };
+type SupportedTest = { test_name: string; unit?: string };
 type OralCancerDetectionResponse = {
   screening_id: string;
   patient_id: string;
@@ -31,8 +32,18 @@ type LabsPageContentProps = {
   forcedSection?: "labs" | "reports";
 };
 
-function normalizeLabIdentity(value?: string | null): string {
-  return (value ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+// One lab user per lab — user email matches lab email exactly.
+function resolveLoggedInLab(
+  user: ReturnType<typeof getUser>,
+  labs: Lab[]
+): Lab | null {
+  const userEmail = (user?.email ?? "").toLowerCase();
+  if (!userEmail) return null;
+  return labs.find((l) => (l.email ?? "").toLowerCase() === userEmail) ?? null;
+}
+
+function resolveLoggedInLabId(user: ReturnType<typeof getUser>, labs: Lab[]): string {
+  return resolveLoggedInLab(user, labs)?.lab_id ?? "";
 }
 
 const REPORT_TYPE_OPTIONS = [
@@ -69,6 +80,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
   const canCreateLab = userRoles.some((r) => ["admin", "lab"].includes(r));
   const canCreateReport = userRoles.some((r) => ["admin", "lab", "doctor"].includes(r));
+  const canManageLabs = userRoles.includes("admin");
 
   const [labs, setLabs] = useState<Lab[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
@@ -77,9 +89,19 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
   // Create Lab
   const [showCreateLab, setShowCreateLab] = useState(false);
-  const [labForm, setLabForm] = useState({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "" });
+  const [labForm, setLabForm] = useState({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "", username: "", password: "" });
   const [creatingLab, setCreatingLab] = useState(false);
   const [labError, setLabError] = useState<string | null>(null);
+  const [showEditLab, setShowEditLab] = useState(false);
+  const [editingLab, setEditingLab] = useState<Lab | null>(null);
+  const [editLabForm, setEditLabForm] = useState({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "" });
+  const [savingLab, setSavingLab] = useState(false);
+  const [editLabError, setEditLabError] = useState<string | null>(null);
+
+  function generatePassword(): string {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
+    return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  }
 
   // Create Report
   const [showCreateReport, setShowCreateReport] = useState(false);
@@ -88,6 +110,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [patientsError, setPatientsError] = useState<string | null>(null);
   const [patientQuery, setPatientQuery] = useState("");
   const [labQuery, setLabQuery] = useState("");
+  const [labSearch, setLabSearch] = useState("");
   const [showPatientOptions, setShowPatientOptions] = useState(false);
   const [showLabOptions, setShowLabOptions] = useState(false);
   const [reportForm, setReportForm] = useState({ patient_id: "", lab_id: "", visit_id: "", report_date: new Date().toISOString().slice(0, 16), report_type: "blood_test", status: "pending", test_name: "", performed_by: "" });
@@ -96,6 +119,9 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [patientVisitsError, setPatientVisitsError] = useState<string | null>(null);
   const [creatingReport, setCreatingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [supportedTests, setSupportedTests] = useState<SupportedTest[]>([]);
+  const [supportedTestsLoading, setSupportedTestsLoading] = useState(false);
+  const [supportedTestsError, setSupportedTestsError] = useState<string | null>(null);
   const [showOralScan, setShowOralScan] = useState(false);
   const [oralPatientQuery, setOralPatientQuery] = useState("");
   const [oralLabQuery, setOralLabQuery] = useState("");
@@ -115,6 +141,12 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
     auto_save: true,
   });
 
+  // Patient name lookup (for doctor view)
+  const [patientNameMap, setPatientNameMap] = useState<Record<string, string>>({});
+  // Patient info lookup (name + CNIC) for lab view
+  const [patientInfoMap, setPatientInfoMap] = useState<Record<string, { name: string; cnic: string }>>({}); 
+  const [labReportSearch, setLabReportSearch] = useState("");
+
   // View Report Modal
   const [viewingReport, setViewingReport] = useState<Report | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
@@ -126,6 +158,26 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   const [addingResult, setAddingResult] = useState(false);
   const [resultError, setResultError] = useState<string | null>(null);
   const [reportStatusFilter, setReportStatusFilter] = useState<"all" | "pending" | "completed">("all");
+
+  async function fetchSupportedTests() {
+    setSupportedTestsLoading(true);
+    setSupportedTestsError(null);
+    try {
+      const response = await api.request<{ supported_tests?: SupportedTest[] } | SupportedTest[]>(
+        "/labs/tests/supported"
+      );
+      const list = Array.isArray(response) ? response : (response.supported_tests ?? []);
+      const uniqueSorted = [...new Map(list.map((t) => [t.test_name, t])).values()].sort((a, b) =>
+        a.test_name.localeCompare(b.test_name)
+      );
+      setSupportedTests(uniqueSorted);
+    } catch (e) {
+      setSupportedTests([]);
+      setSupportedTestsError(e instanceof Error ? e.message : tr("failed"));
+    } finally {
+      setSupportedTestsLoading(false);
+    }
+  }
 
   useEffect(() => {
     const u = getUser();
@@ -166,27 +218,64 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
       const isLabOnlySession =
         userRoles.includes("lab") && !userRoles.includes("admin") && !userRoles.includes("doctor") && !isPatient;
-      let effectiveLabId = "";
-      if (isLabOnlySession) {
-        const normalizedUsername = normalizeLabIdentity(user?.username);
-        const matchedLab =
-          loadedLabs.find((l) => normalizeLabIdentity(l.lab_name) === normalizedUsername) ??
-          loadedLabs.find((l) => normalizeLabIdentity(l.lab_name).includes(normalizedUsername)) ??
-          loadedLabs.find((l) => normalizedUsername.includes(normalizeLabIdentity(l.lab_name)));
-        effectiveLabId = matchedLab?.lab_id ?? "";
-      }
+      const directLabId = isLabOnlySession ? resolveLoggedInLabId(user, loadedLabs) : "";
 
+      const isDoctor = userRoles.includes("doctor");
       const effectivePatientId = patientId || (isPatient ? (user?.patient_id || "") : "");
-      const statusQuery = reportStatusFilter === "all" ? "" : `&status=${encodeURIComponent(reportStatusFilter)}`;
-      let reportsUrl = `/labs/reports?skip=0&limit=100${statusQuery}`;
-      if (effectivePatientId) {
-        reportsUrl = `/labs/reports?patient_id=${effectivePatientId}&skip=0&limit=100${statusQuery}`;
-      } else if (effectiveLabId) {
-        reportsUrl = `/labs/reports?lab_id=${effectiveLabId}&skip=0&limit=100${statusQuery}`;
+      const reportQueryParts = [`skip=0`, `limit=100`];
+      if (effectivePatientId) reportQueryParts.push(`patient_id=${encodeURIComponent(effectivePatientId)}`);
+      if (directLabId) reportQueryParts.push(`lab_id=${encodeURIComponent(directLabId)}`);
+      if (reportStatusFilter !== "all") reportQueryParts.push(`status=${encodeURIComponent(reportStatusFilter)}`);
+      const reportsUrl = `/labs/reports?${reportQueryParts.join("&")}`;
+
+      let r = await api.request<Report[]>(reportsUrl);
+      if (requestId !== loadAllRequestId.current) return;
+
+      if (isLabOnlySession && !directLabId) {
+        // Email-based match already handled in resolveLoggedInLabId; nothing more to infer
       }
 
-      const r = await api.request<Report[]>(reportsUrl);
-      if (requestId !== loadAllRequestId.current) return;
+      // For doctors: filter to only reports of patients who visited them, and build name map
+      if (isDoctor && user?.patient_id) {
+        try {
+          type VisitRow = { patient_id: string; first_name?: string; last_name?: string };
+          const visits = await api.request<VisitRow[]>(`/visits?doctor_patient_id=${user.patient_id}&skip=0&limit=500`);
+          if (requestId !== loadAllRequestId.current) return;
+          const doctorPatientIds = new Set(visits.map((v) => v.patient_id));
+          r = r.filter((rep) => doctorPatientIds.has(rep.patient_id));
+          // Build name map from patients list
+          const nameMap: Record<string, string> = {};
+          await Promise.all(
+            Array.from(doctorPatientIds).map(async (pid) => {
+              try {
+                const p = await api.request<{ first_name: string; last_name: string }>(`/patients/${pid}`);
+                nameMap[pid] = `${p.first_name} ${p.last_name}`;
+              } catch { nameMap[pid] = pid.slice(0, 8); }
+            })
+          );
+          if (requestId !== loadAllRequestId.current) return;
+          setPatientNameMap(nameMap);
+        } catch { /* silently fail name lookup */ }
+      }
+
+      // For lab users: build patient info map (name + CNIC) for all reports
+      if (isLabOnlySession && r.length > 0) {
+        try {
+          const labPatientIds = Array.from(new Set(r.map((rep) => rep.patient_id)));
+          const infoMap: Record<string, { name: string; cnic: string }> = {};
+          await Promise.all(
+            labPatientIds.map(async (pid) => {
+              try {
+                const p = await api.request<{ first_name: string; last_name: string; cnic: string }>(`/patients/${pid}`);
+                infoMap[pid] = { name: `${p.first_name} ${p.last_name}`, cnic: p.cnic ?? "" };
+              } catch { infoMap[pid] = { name: pid.slice(0, 8), cnic: "" }; }
+            })
+          );
+          if (requestId !== loadAllRequestId.current) return;
+          setPatientInfoMap(infoMap);
+        } catch { /* silently fail */ }
+      }
+
       setReports(r);
     } catch (e) {
       if (requestId !== loadAllRequestId.current) return;
@@ -196,23 +285,90 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
   async function handleCreateLab(e: FormEvent) {
     e.preventDefault(); setLabError(null); setCreatingLab(true);
+    let createdLabId: string | null = null;
     try {
-      await api.request("/labs/", {
+      if (!labForm.email) throw new Error("Email is required to create a lab login account");
+      if (!labForm.username) throw new Error("Username is required");
+      if (!labForm.password || labForm.password.length < 8) throw new Error("Password must be at least 8 characters");
+      const createdLab = await api.request<{ lab_id: string }>("/labs/", {
         method: "POST", body: JSON.stringify({
           lab_name: labForm.lab_name, lab_location: labForm.lab_location || null,
           accreditation_number: labForm.accreditation_number || null, phone: labForm.phone || null, email: labForm.email || null,
         })
       });
-      setShowCreateLab(false); setLabForm({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "" });
-      setSuccessMsg(tr("labCreated")); setTimeout(() => setSuccessMsg(null), 3000); await loadAll();
-    } catch (e) { setLabError(e instanceof Error ? e.message : tr("failedToCreateLab")); } finally { setCreatingLab(false); }
+      createdLabId = createdLab.lab_id;
+      // Create login account for the lab
+      await api.request("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username: labForm.username, email: labForm.email, password: labForm.password, role: "lab" }),
+      });
+      // Email credentials to admin
+      await api.request("/auth/send-credentials", {
+        method: "POST",
+        body: JSON.stringify({ name: labForm.lab_name, email: labForm.email, username: labForm.username, password: labForm.password, role: "lab" }),
+      }).catch(() => {}); // non-blocking
+      setShowCreateLab(false); setLabForm({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "", username: "", password: "" });
+      setSuccessMsg(tr("labCreated") + " — credentials emailed"); setTimeout(() => setSuccessMsg(null), 4000); await loadAll();
+    } catch (e) {
+      if (createdLabId) {
+        await api.request(`/labs/${createdLabId}`, { method: "DELETE" }).catch(() => {});
+      }
+      setLabError(e instanceof Error ? e.message : tr("failedToCreateLab"));
+    } finally { setCreatingLab(false); }
+  }
+
+  function openEditLab(lab: Lab) {
+    setEditingLab(lab);
+    setEditLabForm({
+      lab_name: lab.lab_name,
+      lab_location: lab.lab_location ?? "",
+      accreditation_number: lab.accreditation_number ?? "",
+      phone: lab.phone ?? "",
+      email: lab.email ?? "",
+    });
+    setEditLabError(null);
+    setShowEditLab(true);
+  }
+
+  async function handleSaveLab(e: FormEvent) {
+    e.preventDefault();
+    if (!editingLab) return;
+    setEditLabError(null);
+    setSavingLab(true);
+    try {
+      await api.request(`/labs/${editingLab.lab_id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          lab_name: editLabForm.lab_name,
+          lab_location: editLabForm.lab_location || null,
+          accreditation_number: editLabForm.accreditation_number || null,
+          phone: editLabForm.phone || null,
+          email: editLabForm.email || null,
+        }),
+      });
+      setShowEditLab(false);
+      setEditingLab(null);
+      setSuccessMsg("Lab updated successfully");
+      setTimeout(() => setSuccessMsg(null), 3000);
+      await loadAll();
+    } catch (e) {
+      setEditLabError(e instanceof Error ? e.message : tr("failed"));
+    } finally {
+      setSavingLab(false);
+    }
   }
 
   function openCreateReport() {
+    const defaultLabId = userRoles.includes("lab")
+      ? (resolveLoggedInLab(user, labs)?.lab_id ?? "")
+      : "";
+    const defaultLabName = userRoles.includes("lab")
+      ? (resolveLoggedInLab(user, labs)?.lab_name ?? user?.username ?? "")
+      : "";
     setShowCreateReport(true);
     setPatientQuery("");
-    setLabQuery("");
-    setReportForm((prev) => ({ ...prev, patient_id: "", lab_id: "", visit_id: "" }));
+    setLabQuery(defaultLabName);
+    setReportForm((prev) => ({ ...prev, patient_id: "", lab_id: defaultLabId, visit_id: "" }));
     setPatientVisits([]);
     setPatientVisitsError(null);
   }
@@ -238,13 +394,19 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   }
 
   function openOralScanModal() {
+    const defaultLabId = userRoles.includes("lab")
+      ? (resolveLoggedInLab(user, labs)?.lab_id ?? "")
+      : "";
+    const defaultLabName = userRoles.includes("lab")
+      ? (resolveLoggedInLab(user, labs)?.lab_name ?? user?.username ?? "")
+      : "";
     setShowOralScan(true);
     setOralScanError(null);
     setOralPatientQuery("");
-    setOralLabQuery("");
+    setOralLabQuery(defaultLabName);
     setOralScanForm({
       patient_id: "",
-      lab_id: "",
+      lab_id: defaultLabId,
       image: null,
       auto_save: true,
     });
@@ -257,6 +419,17 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
     }, 250);
     return () => clearTimeout(timer);
   }, [showCreateReport, patientQuery]);
+
+  useEffect(() => {
+    if (!showCreateReport) return;
+    void fetchSupportedTests();
+  }, [showCreateReport, language, tr]);
+
+  useEffect(() => {
+    if (!showAddResult) return;
+    if (supportedTests.length > 0) return;
+    void fetchSupportedTests();
+  }, [showAddResult]);
 
   useEffect(() => {
     if (!showCreateReport || !reportForm.patient_id) {
@@ -334,9 +507,23 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
     })
     .slice(0, 20);
 
-  const filteredReports = reports.filter((r) =>
-    reportStatusFilter === "all" ? true : r.status === reportStatusFilter
-  );
+  const filteredLabsMain = labSearch.trim()
+    ? labs.filter((l) => l.lab_name.toLowerCase().includes(labSearch.trim().toLowerCase()))
+    : labs;
+
+  const isLabOnlyView = userRoles.includes("lab") && !userRoles.includes("admin") && !userRoles.includes("doctor");
+  const loggedInLab = userRoles.includes("lab") ? resolveLoggedInLab(user, labs) : null;
+  const filteredReports = reports.filter((r) => {
+    if (reportStatusFilter !== "all" && r.status !== reportStatusFilter) return false;
+    if (isLabOnlyView && labReportSearch.trim()) {
+      const q = labReportSearch.trim().toLowerCase();
+      const info = patientInfoMap[r.patient_id];
+      const name = info?.name.toLowerCase() ?? "";
+      const cnic = info?.cnic.toLowerCase() ?? "";
+      if (!name.includes(q) && !cnic.includes(q)) return false;
+    }
+    return true;
+  });
   const filteredOralPatients = patients
     .filter((p) => {
       const q = oralPatientQuery.trim().toLowerCase();
@@ -414,6 +601,15 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
     } catch (e) { setResultError(e instanceof Error ? e.message : tr("failedToAddResult")); } finally { setAddingResult(false); }
   }
 
+  function handleResultTestChange(testName: string) {
+    const selectedTest = supportedTests.find((test) => test.test_name === testName);
+    setResultForm((prev) => ({
+      ...prev,
+      test_name: testName,
+      unit: selectedTest?.unit ?? "",
+    }));
+  }
+
   async function handleDeleteLab(labId: string) {
     if (!confirm(tr("confirmDeleteLab"))) return;
     try { await api.request(`/labs/${labId}`, { method: "DELETE" }); await loadAll(); } catch (e) { setError(e instanceof Error ? e.message : tr("failed")); }
@@ -452,38 +648,61 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="space-y-4">
       <PageHeader
-        title={isPatient ? tr("myLabReports") : tr("labsAndReports")}
-        subtitle={isPatient ? tr("myLabReportsSubtitle") : tr("labsAndReportsSubtitle")}
+        title={
+          isPatient
+            ? tr("myLabReports")
+            : userRoles.includes("doctor")
+            ? "Lab Reports"
+            : userRoles.includes("lab") && showReportsSection
+            ? "Reports"
+            : userRoles.includes("lab") && showLabsSection
+            ? "Labs"
+            : "Labs"
+        }
+        subtitle={
+          isPatient
+            ? tr("myLabReportsSubtitle")
+            : userRoles.includes("lab") && showReportsSection
+            ? "Manage and view all reports."
+            : userRoles.includes("lab") && showLabsSection
+            ? "Manage and view all labs."
+            : tr("labsAndReportsSubtitle")
+        }
         icon={<FlaskConical size={20} />}
         right={
           <div className="flex flex-col md:flex-row items-end md:items-center gap-4">
-            {!isPatient && (
+            {!isPatient && userRoles.includes("lab") && (
               <div className="flex items-center gap-2 overflow-visible relative z-40">
-                <PatientSearch onSelect={setPatientId} className="w-64" />
-                {showLabsSection && canCreateLab && <button className="btn-primary text-sm whitespace-nowrap" onClick={() => setShowCreateLab(true)}><Plus size={16} /> {tr("newLab")}</button>}
-                {showReportsSection && canCreateReport && <button className="btn-primary text-sm whitespace-nowrap" onClick={openCreateReport}><Plus size={16} /> {tr("newReport")}</button>}
-                {showReportsSection && canCreateReport && (
-                  <button className="btn-primary text-sm whitespace-nowrap" onClick={openOralScanModal}>
-                    <ImagePlus size={16} /> Oral Scan
-                  </button>
+                {showLabsSection && (
+                  <input
+                    className="input w-64"
+                    placeholder="Search labs by name"
+                    value={labSearch}
+                    onChange={e => setLabSearch(e.target.value)}
+                  />
+                )}
+                {showReportsSection && (
+                  <>
+                    <input
+                      className="input w-64"
+                      placeholder="Search reports by patient / CNIC"
+                      value={labReportSearch}
+                      onChange={e => setLabReportSearch(e.target.value)}
+                    />
+                    <button className="btn-primary text-sm whitespace-nowrap" onClick={openCreateReport}>
+                      <Plus size={16} /> {tr("newReport")}
+                    </button>
+                    <button className="btn-primary text-sm whitespace-nowrap" onClick={openOralScanModal}>
+                      <ImagePlus size={16} /> Oral Scan
+                    </button>
+                  </>
                 )}
               </div>
             )}
-
-            {false && user?.roles.includes("doctor") && user?.patient_id && (
-              <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1">
-                <button
-                  onClick={() => setLocalViewMode("clinical")}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-full transition ${localViewMode === "clinical" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-                >
-                  {tr("clinical")}
-                </button>
-                <button
-                  onClick={() => setLocalViewMode("personal")}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-full transition ${localViewMode === "personal" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-emerald-500"}`}
-                >
-                  {tr("personal")}
-                </button>
+            {!isPatient && !userRoles.includes("lab") && (
+              <div className="flex items-center gap-2 overflow-visible relative z-40">
+                <PatientSearch onSelect={setPatientId} className="w-64" />
+                {showLabsSection && canCreateLab && <button className="btn-primary text-sm whitespace-nowrap" onClick={() => { setLabForm({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "", username: "", password: generatePassword() }); setLabError(null); setShowCreateLab(true); }}><Plus size={16} /> {tr("newLab")}</button>}
               </div>
             )}
           </div>
@@ -493,45 +712,279 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       {error && <div className="card p-4 text-sm text-danger">{error}</div>}
       {successMsg && <div className="alert-success">{successMsg}</div>}
 
+      {/* Edit Lab Modal */}
+      {showEditLab && editingLab && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.45)", backdropFilter: "blur(4px)" }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+            className="w-full max-w-lg rounded-2xl border border-primary/10 shadow-2xl"
+            style={{ background: "rgba(255,255,255,0.97)", backdropFilter: "blur(20px)" }}
+          >
+            <div className="flex items-center justify-between border-b border-primary/10 px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 shadow-md shadow-primary/20">
+                  <Pencil size={16} className="text-white" />
+                </div>
+                <h2 className="text-base font-semibold text-slate-800">Edit Lab</h2>
+              </div>
+              <button
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                onClick={() => setShowEditLab(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form className="space-y-4 px-6 py-5" onSubmit={handleSaveLab}>
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("labName")} <span className="text-primary">*</span></label>
+                <input
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                  value={editLabForm.lab_name}
+                  onChange={(e) => setEditLabForm({ ...editLabForm, lab_name: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("location")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    value={editLabForm.lab_location}
+                    onChange={(e) => setEditLabForm({ ...editLabForm, lab_location: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("accreditation")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    value={editLabForm.accreditation_number}
+                    onChange={(e) => setEditLabForm({ ...editLabForm, accreditation_number: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("phone")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    value={editLabForm.phone}
+                    onChange={(e) => setEditLabForm({ ...editLabForm, phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("email")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    type="email"
+                    value={editLabForm.email}
+                    onChange={(e) => setEditLabForm({ ...editLabForm, email: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {editLabError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{editLabError}</div>}
+
+              <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:border-slate-300"
+                  onClick={() => setShowEditLab(false)}
+                >
+                  {tr("cancel")}
+                </button>
+                <button className="btn-primary" disabled={savingLab}>
+                  {savingLab ? tr("saving") : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
       {/* Create Lab Modal */}
       {showCreateLab && (
-        <div className="modal-overlay">
-          <div className="card w-full max-w-lg p-6">
-            <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">{tr("createLab")}</h2><button className="btn-ghost text-sm" onClick={() => setShowCreateLab(false)}><X size={16} /></button></div>
-            <form className="mt-4 space-y-4" onSubmit={handleCreateLab}>
-              <div><label className="mb-1 block text-sm font-medium">{tr("labName")} *</label><input className="input" value={labForm.lab_name} onChange={(e) => setLabForm({ ...labForm, lab_name: e.target.value })} required placeholder="e.g., Chughtai Lab" /></div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div><label className="mb-1 block text-sm font-medium">{tr("location")}</label><input className="input" value={labForm.lab_location} onChange={(e) => setLabForm({ ...labForm, lab_location: e.target.value })} /></div>
-                <div><label className="mb-1 block text-sm font-medium">{tr("accreditation")}</label><input className="input" value={labForm.accreditation_number} onChange={(e) => setLabForm({ ...labForm, accreditation_number: e.target.value })} /></div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.45)", backdropFilter: "blur(4px)" }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+            className="w-full max-w-lg rounded-2xl border border-primary/10 shadow-2xl"
+            style={{ background: "rgba(255,255,255,0.97)", backdropFilter: "blur(20px)" }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-primary/10 px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 shadow-md shadow-primary/20">
+                  <FlaskConical size={16} className="text-white" />
+                </div>
+                <h2 className="text-base font-semibold text-slate-800">{tr("createLab")}</h2>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div><label className="mb-1 block text-sm font-medium">{tr("phone")}</label><input className="input" value={labForm.phone} onChange={(e) => setLabForm({ ...labForm, phone: e.target.value })} /></div>
-                <div><label className="mb-1 block text-sm font-medium">{tr("email")}</label><input className="input" type="email" value={labForm.email} onChange={(e) => setLabForm({ ...labForm, email: e.target.value })} /></div>
+              <button
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                onClick={() => setShowCreateLab(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form className="space-y-4 px-6 py-5" onSubmit={handleCreateLab}>
+              {/* Lab Name */}
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("labName")} <span className="text-primary">*</span></label>
+                <input
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                  value={labForm.lab_name}
+                  onChange={(e) => setLabForm({ ...labForm, lab_name: e.target.value })}
+                  required
+                  placeholder="e.g., Chughtai Lab"
+                />
               </div>
-              {labError && <p className="text-sm text-danger">{labError}</p>}
-              <div className="flex justify-end gap-2"><button type="button" className="btn-ghost text-sm" onClick={() => setShowCreateLab(false)}>{tr("cancel")}</button><button className="btn-primary" disabled={creatingLab}>{creatingLab ? tr("creating") : tr("createLab")}</button></div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("location")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    value={labForm.lab_location}
+                    onChange={(e) => setLabForm({ ...labForm, lab_location: e.target.value })}
+                    placeholder="e.g., Lahore, Pakistan"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("accreditation")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    value={labForm.accreditation_number}
+                    onChange={(e) => setLabForm({ ...labForm, accreditation_number: e.target.value })}
+                    placeholder="e.g., PAL-0001"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("phone")}</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    value={labForm.phone}
+                    onChange={(e) => setLabForm({ ...labForm, phone: e.target.value })}
+                    placeholder="+92 300 0000000"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("email")} <span className="text-primary">*</span></label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                    type="email"
+                    value={labForm.email}
+                    onChange={(e) => setLabForm({ ...labForm, email: e.target.value, username: e.target.value.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "") })}
+                    required
+                    placeholder="lab@example.com"
+                  />
+                </div>
+              </div>
+
+              {/* Login Credentials */}
+              <div className="border-t border-slate-100 pt-2">
+                <p className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Login Credentials</p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-slate-700">Username <span className="text-primary">*</span></label>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                      value={labForm.username}
+                      onChange={(e) => setLabForm({ ...labForm, username: e.target.value })}
+                      required
+                      placeholder="e.g., chughtailab"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-slate-700">Password <span className="text-primary">*</span></label>
+                    <div className="flex gap-2">
+                      <input
+                        className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-mono text-slate-800 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                        type="text"
+                        value={labForm.password}
+                        onChange={(e) => setLabForm({ ...labForm, password: e.target.value })}
+                        required
+                        minLength={8}
+                        placeholder="Min 8 characters"
+                      />
+                      <button
+                        type="button"
+                        title="Generate random password"
+                        className="flex items-center gap-1 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/10"
+                        onClick={() => setLabForm({ ...labForm, password: generatePassword() })}
+                      >
+                        <RefreshCw size={13} />
+                        Gen
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-400">Credentials will be emailed to the admin after creation.</p>
+              </div>
+
+              {labError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{labError}</div>
+              )}
+
+              <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:border-slate-300"
+                  onClick={() => setShowCreateLab(false)}
+                >
+                  {tr("cancel")}
+                </button>
+                <button className="btn-primary" disabled={creatingLab}>
+                  {creatingLab ? tr("creating") : tr("createLab")}
+                </button>
+              </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
 
       {/* Create Report Modal */}
       {showCreateReport && (
-        <div className="modal-overlay">
-          <div className="card w-full max-w-2xl overflow-hidden p-0">
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <h2 className="text-lg font-semibold">{tr("createLabReport")}</h2>
-              <button className="btn-ghost text-sm" onClick={() => setShowCreateReport(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(15,23,42,0.45)", backdropFilter: "blur(4px)" }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+            className="w-full max-w-2xl rounded-2xl border border-primary/10 shadow-2xl"
+            style={{ background: "rgba(255,255,255,0.97)", backdropFilter: "blur(20px)" }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-primary/10 px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 shadow-md shadow-primary/20">
+                  <FlaskConical size={16} className="text-white" />
+                </div>
+                <h2 className="text-base font-semibold text-slate-800">{tr("createLabReport")}</h2>
+              </div>
+              <button
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                onClick={() => setShowCreateReport(false)}
+              >
                 <X size={16} />
               </button>
             </div>
-            <form className="max-h-[80vh] space-y-5 overflow-y-auto p-6" onSubmit={handleCreateReport}>
+
+            <form className="max-h-[80vh] space-y-4 overflow-y-auto px-6 py-5" onSubmit={handleCreateReport}>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Patient */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium">{tr("patient")} *</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("patient")} <span className="text-primary">*</span></label>
                   <div className="relative">
                     <input
-                      className="input w-full"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
                       value={patientQuery}
                       onChange={(e) => {
                         setPatientQuery(e.target.value);
@@ -544,12 +997,12 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                       disabled={patientsLoading}
                     />
                     {showPatientOptions && !patientsLoading && (
-                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
+                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
                         {filteredPatients.length > 0 ? filteredPatients.map((p) => (
                           <button
                             key={p.patient_id}
                             type="button"
-                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 transition"
                             onMouseDown={(e) => {
                               e.preventDefault();
                               setReportForm((prev) => ({ ...prev, patient_id: p.patient_id, visit_id: "" }));
@@ -563,65 +1016,77 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                       </div>
                     )}
                   </div>
-                  {patientsError && <p className="mt-1 text-xs text-danger">{patientsError}</p>}
+                  {patientsError && <p className="mt-1 text-xs text-red-500">{patientsError}</p>}
                 </div>
+
+                {/* Lab */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium">{tr("lab")} *</label>
-                  <div className="relative">
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("lab")} <span className="text-primary">*</span></label>
+                  {isLabOnlyView ? (
                     <input
-                      className="input w-full"
-                      value={labQuery}
-                      onChange={(e) => {
-                        setLabQuery(e.target.value);
-                        setReportForm((prev) => ({ ...prev, lab_id: "" }));
-                        setShowLabOptions(true);
-                      }}
-                      onFocus={() => setShowLabOptions(true)}
-                      onBlur={() => setTimeout(() => setShowLabOptions(false), 120)}
-                      placeholder="Type lab name"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm"
+                      value={loggedInLab?.lab_name ?? labQuery ?? user?.username ?? ""}
+                      readOnly
                     />
-                    {showLabOptions && (
-                      <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
-                        {filteredLabs.length > 0 ? filteredLabs.map((l) => (
-                          <button
-                            key={l.lab_id}
-                            type="button"
-                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              setReportForm((prev) => ({ ...prev, lab_id: l.lab_id }));
-                              setLabQuery(l.lab_name);
-                              setShowLabOptions(false);
-                            }}
-                          >
-                            {l.lab_name}
-                          </button>
-                        )) : <div className="px-3 py-2 text-xs text-slate-400">No matching labs</div>}
-                      </div>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="relative">
+                      <input
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
+                        value={labQuery}
+                        onChange={(e) => {
+                          setLabQuery(e.target.value);
+                          setReportForm((prev) => ({ ...prev, lab_id: "" }));
+                          setShowLabOptions(true);
+                        }}
+                        onFocus={() => setShowLabOptions(true)}
+                        onBlur={() => setTimeout(() => setShowLabOptions(false), 120)}
+                        placeholder="Type lab name"
+                      />
+                      {showLabOptions && (
+                        <div className="absolute left-0 right-0 top-full z-[12000] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl">
+                          {filteredLabs.length > 0 ? filteredLabs.map((l) => (
+                            <button
+                              key={l.lab_id}
+                              type="button"
+                              className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 transition"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setReportForm((prev) => ({ ...prev, lab_id: l.lab_id }));
+                                setLabQuery(l.lab_name);
+                                setShowLabOptions(false);
+                              }}
+                            >
+                              {l.lab_name}
+                            </button>
+                          )) : <div className="px-3 py-2 text-xs text-slate-400">No matching labs</div>}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
+
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Report Type */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium">{tr("reportType")} *</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("reportType")} <span className="text-primary">*</span></label>
                   <select
-                    className="input w-full"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
                     value={reportForm.report_type}
                     onChange={(e) => setReportForm({ ...reportForm, report_type: e.target.value })}
                     required
                   >
                     {REPORT_TYPE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option.replace(/_/g, " ")}
-                      </option>
+                      <option key={option} value={option}>{option.replace(/_/g, " ")}</option>
                     ))}
                   </select>
                 </div>
+
+                {/* Status */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium">{tr("status")}</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("status")}</label>
                   <select
-                    className="input w-full"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
                     value={reportForm.status}
                     onChange={(e) => setReportForm({ ...reportForm, status: e.target.value })}
                   >
@@ -630,11 +1095,13 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                   </select>
                 </div>
               </div>
+
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Linked Visit */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Linked Visit (Optional)</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">Linked Visit <span className="text-slate-400 font-normal">(Optional)</span></label>
                   <select
-                    className="input w-full"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-50"
                     value={reportForm.visit_id}
                     onChange={(e) => setReportForm({ ...reportForm, visit_id: e.target.value })}
                     disabled={!reportForm.patient_id || patientVisitsLoading}
@@ -646,40 +1113,45 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                       </option>
                     ))}
                   </select>
-                  {patientVisitsError && <p className="mt-1 text-xs text-danger">{patientVisitsError}</p>}
+                  {patientVisitsError && <p className="mt-1 text-xs text-red-500">{patientVisitsError}</p>}
                 </div>
+
+                {/* Date */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium">{tr("date")} *</label>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("date")} <span className="text-primary">*</span></label>
                   <input
-                    className="input w-full"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
                     type="datetime-local"
                     value={reportForm.report_date}
                     onChange={(e) => setReportForm({ ...reportForm, report_date: e.target.value })}
                     required
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium">{tr("testName")}</label>
-                  <input
-                    className="input w-full"
-                    value={reportForm.test_name}
-                    onChange={(e) => setReportForm({ ...reportForm, test_name: e.target.value })}
-                    placeholder="e.g., HbA1c"
-                  />
-                </div>
+
+
               </div>
+
+              {/* Performed By */}
               <div>
-                <label className="mb-1 block text-sm font-medium">{tr("performedBy")}</label>
+                <label className="mb-1.5 block text-sm font-semibold text-slate-700">{tr("performedBy")}</label>
                 <input
-                  className="input w-full"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15"
                   value={reportForm.performed_by}
                   onChange={(e) => setReportForm({ ...reportForm, performed_by: e.target.value })}
                   placeholder={tr("performedByPlaceholder")}
                 />
               </div>
-              {reportError && <p className="text-sm text-danger">{reportError}</p>}
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <button type="button" className="btn-ghost text-sm" onClick={() => setShowCreateReport(false)}>
+
+              {reportError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{reportError}</div>
+              )}
+
+              <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:border-slate-300"
+                  onClick={() => setShowCreateReport(false)}
+                >
                   {tr("cancel")}
                 </button>
                 <button className="btn-primary" disabled={creatingReport}>
@@ -687,7 +1159,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
 
@@ -854,14 +1326,14 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
             </div>
           </div>
           <table className="w-full min-w-[500px] text-sm">
-            <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("type")}</th><th className="px-4 py-3 text-left">{tr("status")}</th><th className="px-4 py-3 text-left">{tr("date")}</th><th className="px-4 py-3 text-left">{tr("test")}</th></tr></thead>
+            <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("type")}</th><th className="px-4 py-3 text-left">{tr("status")}</th><th className="px-4 py-3 text-left">{tr("date")}</th><th className="px-4 py-3 text-left">{tr("laboratory")}</th></tr></thead>
             <tbody>
               {filteredReports.map((r) => (
                 <tr key={r.report_id} className={`table-row cursor-pointer transition ${viewingReport?.report_id === r.report_id ? "bg-primary/5" : "hover:bg-primary/5"}`} onClick={() => selectReport(r)}>
                   <td className="px-4 py-3 capitalize">{r.report_type.replace(/_/g, " ")}</td>
                   <td className="px-4 py-3"><span className={`badge ${r.status === "completed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{tr(r.status)}</span></td>
                   <td className="px-4 py-3">{String(r.report_date).slice(0, 10)}</td>
-                  <td className="px-4 py-3">{r.test_name ?? "-"}</td>
+                  <td className="px-4 py-3">{labs.find((l) => l.lab_id === r.lab_id)?.lab_name ?? "-"}</td>
                 </tr>
               ))}
               {filteredReports.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">{tr("noLabReportsFound")}</td></tr>}
@@ -869,77 +1341,49 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
           </table>
         </div>
       ) : (
-        /* Admin/Doctor/Lab view: Labs + Reports */
-        <div className={`grid grid-cols-1 gap-4 ${showLabsSection && showReportsSection ? "xl:grid-cols-2" : ""}`}>
-          {showLabsSection && <div className="card overflow-x-auto p-0">
-            <div className="border-b border-border px-4 py-3 font-semibold">{tr("labs")} ({labs.length})</div>
-            <table className="w-full min-w-[400px] text-sm">
-              <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("name")}</th><th className="px-4 py-3 text-left">{tr("location")}</th><th className="px-4 py-3 text-left">{tr("accreditationShort")}</th>{canCreateLab && <th className="px-4 py-3 text-left">{tr("actions")}</th>}</tr></thead>
-              <tbody>
-                {labs.map((lab) => (
-                  <tr key={lab.lab_id} className="table-row"><td className="px-4 py-3 font-medium">{lab.lab_name}</td><td className="px-4 py-3">{lab.lab_location ?? "-"}</td><td className="px-4 py-3">{lab.accreditation_number ?? "-"}</td>{canCreateLab && <td className="px-4 py-3"><button className="text-danger hover:text-danger/80 transition" onClick={() => handleDeleteLab(lab.lab_id)}><Trash2 size={14} /></button></td>}</tr>
-                ))}
-              </tbody>
-            </table>
-          </div>}
-          {showReportsSection && <div className="card overflow-x-auto p-0">
-            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
-              <div className="font-semibold">{tr("reports")} ({filteredReports.length})</div>
-              <div className="inline-flex items-center gap-1 rounded-full border border-border bg-slate-100/40 p-1">
-                <button
-                  type="button"
-                  onClick={() => setReportStatusFilter("all")}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "all" ? "bg-white text-primary shadow-sm" : "text-muted hover:text-foreground"}`}
-                >
-                  Both
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setReportStatusFilter("pending")}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "pending" ? "bg-warning/20 text-warning" : "text-muted hover:text-foreground"}`}
-                >
-                  {tr("pending")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setReportStatusFilter("completed")}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "completed" ? "bg-success/20 text-success" : "text-muted hover:text-foreground"}`}
-                >
-                  {tr("completed")}
-                </button>
-              </div>
+        /* Admin/Doctor/Lab view: Labs + Reports (stacked, full width) */
+        <div className="flex flex-col gap-4">
+          {/* Show Labs section for all except doctors */}
+          {showLabsSection && !userRoles.includes("doctor") && (
+            <div className="card overflow-x-auto p-0">
+              <div className="border-b border-border px-4 py-3 font-bold text-lg text-slate-800 tracking-wide bg-gradient-to-r from-primary/10 to-cyan-50">Labs ({filteredLabsMain.length})</div>
+              <table className="w-full min-w-[400px] text-sm">
+                <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("name")}</th><th className="px-4 py-3 text-left">{tr("location")}</th><th className="px-4 py-3 text-left">{tr("accreditationShort")}</th>{canManageLabs && <th className="px-4 py-3 text-left">Actions</th>}</tr></thead>
+                <tbody>
+                  {filteredLabsMain.map((lab) => (
+                    <tr key={lab.lab_id} className="table-row">
+                      <td className="px-4 py-3 font-medium">{lab.lab_name}</td>
+                      <td className="px-4 py-3">{lab.lab_location ?? "-"}</td>
+                      <td className="px-4 py-3">{lab.accreditation_number ?? "-"}</td>
+                      {canManageLabs && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="rounded-lg bg-primary/10 p-2 text-primary transition hover:bg-primary/20"
+                              title="Edit Lab"
+                              onClick={() => openEditLab(lab)}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-lg bg-danger/10 p-2 text-danger transition hover:bg-danger/20"
+                              title="Delete Lab"
+                              onClick={() => handleDeleteLab(lab.lab_id)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {filteredLabsMain.length === 0 && <tr><td colSpan={canManageLabs ? 4 : 3} className="px-4 py-8 text-center text-muted">No labs found</td></tr>}
+                </tbody>
+              </table>
             </div>
-            <table className="w-full min-w-[400px] text-sm">
-              <thead className="table-header"><tr><th className="px-4 py-3 text-left">{tr("type")}</th><th className="px-4 py-3 text-left">{tr("status")}</th><th className="px-4 py-3 text-left">{tr("date")}</th><th className="px-4 py-3 text-left">{tr("actions")}</th></tr></thead>
-              <tbody>
-                {filteredReports.map((r) => (
-                  <tr key={r.report_id} className={`table-row cursor-pointer transition ${viewingReport?.report_id === r.report_id ? "bg-primary/5" : "hover:bg-primary/5"}`} onClick={() => selectReport(r)}>
-                    <td className="px-4 py-3 capitalize">{r.report_type.replace(/_/g, " ")}</td>
-                    <td className="px-4 py-3"><span className={`badge ${r.status === "completed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{tr(r.status)}</span></td>
-                    <td className="px-4 py-3">{String(r.report_date).slice(0, 10)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        {r.status === "pending" && (
-                          <button
-                            className="text-success hover:text-success/80 transition"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMarkReportCompleted(r.report_id);
-                            }}
-                            title="Mark Completed"
-                          >
-                            <CheckCircle size={16} />
-                          </button>
-                        )}
-                        <button className="text-danger hover:text-danger/80 transition" onClick={(e) => { e.stopPropagation(); handleDeleteReport(r.report_id); }} title={tr("delete")}><Trash2 size={14} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filteredReports.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">{tr("noLabReportsFound")}</td></tr>}
-              </tbody>
-            </table>
-          </div>}
+          )}
         </div>
       )}
 
@@ -947,12 +1391,15 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
       {viewModalOpen && viewingReport && (
         <div className="modal-overlay z-[100] p-4 flex items-center justify-center overflow-hidden">
           <div className="bg-white text-slate-900 w-full max-w-4xl max-h-[95vh] rounded-xl shadow-2xl flex flex-col relative overflow-hidden print:shadow-none print:m-0 print:max-h-none">
-            <button className="absolute top-4 right-4 z-10 p-2 hover:bg-slate-100 rounded-full transition no-print" onClick={() => setViewModalOpen(false)}>
+
+            {/* Move close button higher and further right to avoid overlap */}
+            <button className="absolute top-2 right-2 z-20 p-2 hover:bg-slate-100 rounded-full transition no-print" onClick={() => setViewModalOpen(false)}>
               <X size={20} className="text-slate-500" />
             </button>
 
             <div className="flex-1 overflow-y-auto">
-              <div className="p-8 border-b-4 border-primary bg-slate-50 flex flex-col md:flex-row justify-between items-start gap-6">
+              {/* Increase top padding to fully clear the close button and its hover effect */}
+              <div className="pt-14 p-8 border-b-4 border-primary bg-slate-50 flex flex-col md:flex-row justify-between items-start gap-6">
                 <div>
                   <div className="flex items-center gap-2 text-primary mb-2">
                     <FlaskConical size={24} />
@@ -1027,7 +1474,20 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                       <form className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end" onSubmit={handleAddResult}>
                         <div className="md:col-span-2">
                           <label className="block text-xs font-bold text-slate-500 mb-1">{tr("testName")} *</label>
-                          <input className="input input-light" value={resultForm.test_name} onChange={(e) => setResultForm({ ...resultForm, test_name: e.target.value })} required placeholder={tr("testNamePlaceholder")} />
+                          <select
+                            className="input input-light"
+                            value={resultForm.test_name}
+                            onChange={(e) => handleResultTestChange(e.target.value)}
+                            required
+                          >
+                            <option value="">{supportedTestsLoading ? tr("loading") : tr("selectOption")}</option>
+                            {supportedTests.map((test) => (
+                              <option key={test.test_name} value={test.test_name}>
+                                {test.test_name.replace(/_/g, " ")}
+                              </option>
+                            ))}
+                          </select>
+                          {supportedTestsError && <p className="mt-1 text-xs text-danger">{supportedTestsError}</p>}
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">{tr("value")} *</label>
@@ -1035,7 +1495,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">{tr("unit")}</label>
-                          <input className="input input-light" value={resultForm.unit} onChange={(e) => setResultForm({ ...resultForm, unit: e.target.value })} placeholder={tr("unitPlaceholder")} />
+                          <input className="input input-light bg-slate-50 text-slate-600" value={resultForm.unit} readOnly placeholder={tr("unitPlaceholder")} />
                         </div>
                         <div className="md:col-span-4 flex justify-end gap-2 mt-2">
                           <button type="button" className="btn-ghost text-xs" onClick={() => setShowAddResult(false)}>{tr("cancel")}</button>

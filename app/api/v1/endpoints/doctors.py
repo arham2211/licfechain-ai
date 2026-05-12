@@ -11,6 +11,8 @@ from uuid import UUID
 
 from app.db.session import get_db
 from app.models import Patient
+from app.models.auth import User, UserRole, Role
+from app.api.v1.dependencies import require_roles
 from app.schemas.doctor import Doctor as DoctorSchema, DoctorCreate, DoctorUpdate
 
 router = APIRouter()
@@ -125,6 +127,7 @@ async def get_doctor(
 async def update_doctor(
     doctor_id: UUID,
     doctor_update: DoctorUpdate,
+    _user=Depends(require_roles("admin")),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a doctor's doctor-specific fields"""
@@ -171,9 +174,10 @@ async def update_doctor(
 @router.delete("/{doctor_id}")
 async def delete_doctor(
     doctor_id: UUID,
+    _user=Depends(require_roles("admin")),
     db: AsyncSession = Depends(get_db)
 ):
-    """Remove doctor status from a patient (does not delete the patient record)"""
+    """Remove all doctor functionality from a person while preserving the patient record."""
     try:
         result = await db.execute(
             select(Patient).where(
@@ -186,21 +190,52 @@ async def delete_doctor(
         if not db_doctor:
             raise HTTPException(status_code=404, detail="Doctor not found")
         
-        # Remove doctor status but keep patient record
+        # Remove doctor-specific fields but keep the patient record.
         db_doctor.is_doctor = False
         db_doctor.specialization = None
         db_doctor.license_number = None
         db_doctor.hospital_affiliation = None
+
+        # Remove doctor-role access from linked auth accounts.
+        doctor_users_result = await db.execute(
+            select(User)
+            .join(User.user_roles)
+            .join(UserRole.role)
+            .where(
+                User.patient_id == doctor_id,
+                Role.name == "doctor",
+            )
+        )
+        doctor_users = doctor_users_result.scalars().unique().all()
+        for doctor_user in doctor_users:
+            doctor_role_links_result = await db.execute(
+                select(UserRole)
+                .join(UserRole.role)
+                .where(
+                    UserRole.user_id == doctor_user.user_id,
+                    Role.name == "doctor",
+                )
+            )
+            doctor_role_links = doctor_role_links_result.scalars().all()
+            for doctor_role_link in doctor_role_links:
+                await db.delete(doctor_role_link)
+
+            remaining_roles_result = await db.execute(
+                select(UserRole).where(UserRole.user_id == doctor_user.user_id)
+            )
+            remaining_roles = remaining_roles_result.scalars().all()
+            if not remaining_roles:
+                await db.delete(doctor_user)
         
         await db.commit()
         
-        return {"message": "Doctor status removed successfully. Patient record preserved."}
+        return {"message": "Doctor functionality removed successfully. Patient record preserved."}
     
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to remove doctor status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove doctor functionality: {str(e)}")
 
 @router.get("/specializations/list")
 async def get_specializations(db: AsyncSession = Depends(get_db)):

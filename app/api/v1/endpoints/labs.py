@@ -3,6 +3,7 @@ Lab CRUD API endpoints
 """
 
 from typing import List, Optional, Any
+import re
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
@@ -10,7 +11,9 @@ from uuid import UUID
 from datetime import datetime, date
 
 from app.db.session import get_db
-from app.models import Lab, LabReport, LabTestResult, Patient, DoctorVisit
+from app.models import Lab, LabReport, LabTestResult, Patient, DoctorVisit, DiseaseProgression, OralCancerScreening, Diagnosis
+from app.models.auth import User, UserRole, Role
+from app.models.visit import DiagnosisStatusEnum
 from app.schemas.lab import (
     Lab as LabSchema,
     LabCreate,
@@ -29,6 +32,261 @@ from app.core.test_reference_ranges import (
 from app.api.v1.dependencies import get_translation_language, apply_translation, require_roles
 
 router = APIRouter()
+
+
+def _norm(value: Optional[str]) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (value or "").strip().lower()).strip("_")
+
+
+def _infer_disease_key(report: LabReport, test_results: List[LabTestResult]) -> Optional[str]:
+    haystack = " ".join(
+        [
+            _norm(report.report_type),
+            _norm(getattr(report, "test_name", None)),
+            " ".join(_norm(r.test_name) for r in test_results),
+        ]
+    )
+
+    if any(k in haystack for k in ["ckd", "kidney", "egfr", "creatinine", "bun", "uacr"]):
+        return "ckd"
+    if any(k in haystack for k in ["diabetes", "hba1c", "glucose", "insulin"]):
+        return "diabetes"
+    if any(k in haystack for k in ["anemia", "hemoglobin", "ferritin", "serum_iron", "hematocrit"]):
+        return "anemia"
+    if any(k in haystack for k in ["parathyroid", "pth", "calcium", "phosphorus"]):
+        return "parathyroid"
+    if any(k in haystack for k in ["oral", "oral_cancer", "oral_cancer_screening", "oral_cancer_image_screening"]):
+        return "oral_cancer"
+    return None
+
+
+def _as_lookup(test_results: List[LabTestResult]) -> dict[str, float]:
+    lookup: dict[str, float] = {}
+    for row in test_results:
+        if row.test_value is None:
+            continue
+        key = _norm(row.test_name)
+        lookup[key] = float(row.test_value)
+    return lookup
+
+
+def _first_value(lookup: dict[str, float], keys: List[str]) -> Optional[float]:
+    for key in keys:
+        if key in lookup:
+            return lookup[key]
+    return None
+
+
+def _estimate_progression_stage(disease_key: str, lookup: dict[str, float]) -> tuple[str, float]:
+    if disease_key == "ckd":
+        egfr = _first_value(lookup, ["egfr", "e_gfr"])
+        if egfr is not None:
+            if egfr >= 90:
+                return "Stage 1", 0.82
+            if egfr >= 60:
+                return "Stage 2", 0.84
+            if egfr >= 45:
+                return "Stage 3a", 0.86
+            if egfr >= 30:
+                return "Stage 3b", 0.88
+            if egfr >= 15:
+                return "Stage 4", 0.90
+            return "ESRD", 0.92
+        creatinine = _first_value(lookup, ["serum_creatinine", "creatinine"])
+        if creatinine is not None and creatinine >= 2.0:
+            return "Stage 4", 0.74
+        return "Stage 3", 0.65
+
+    if disease_key == "diabetes":
+        hba1c = _first_value(lookup, ["hba1c", "hb_a1c"])
+        glucose = _first_value(lookup, ["fasting_glucose", "glucose"])
+        if hba1c is not None:
+            if hba1c < 5.7:
+                return "Normal", 0.86
+            if hba1c < 6.5:
+                return "Prediabetes", 0.88
+            if hba1c < 8.0:
+                return "Diabetes", 0.9
+            return "Complicated", 0.92
+        if glucose is not None:
+            if glucose < 100:
+                return "Normal", 0.8
+            if glucose < 126:
+                return "Prediabetes", 0.82
+            if glucose < 180:
+                return "Diabetes", 0.84
+            return "Complicated", 0.86
+        return "Diabetes", 0.6
+
+    if disease_key == "anemia":
+        hb = _first_value(lookup, ["hemoglobin", "hb"])
+        if hb is not None:
+            if hb >= 12:
+                return "Normal", 0.84
+            if hb >= 10:
+                return "Mild", 0.86
+            if hb >= 8:
+                return "Moderate", 0.88
+            return "Severe", 0.9
+        return "Mild", 0.6
+
+    if disease_key == "parathyroid":
+        pth = _first_value(lookup, ["pth", "parathyroid_hormone"])
+        calcium = _first_value(lookup, ["calcium", "ca"])
+        if pth is not None and calcium is not None:
+            if pth > 65 and calcium > 10.2:
+                return "Primary Hyperparathyroidism", 0.86
+            if pth > 65 and calcium <= 10.2:
+                return "Secondary Hyperparathyroidism", 0.84
+            if pth < 15:
+                return "Hypoparathyroidism", 0.83
+            return "Normal", 0.8
+        return "Normal", 0.6
+
+    return "Stable", 0.5
+
+
+def _disease_name_from_key(disease_key: str) -> str:
+    mapping = {
+        "ckd": "chronic_kidney_disease",
+        "diabetes": "diabetes",
+        "anemia": "anemia",
+        "parathyroid": "parathyroid_disorder",
+        "oral_cancer": "oral_cancer",
+    }
+    return mapping.get(disease_key, disease_key)
+
+
+async def _auto_upsert_visit_diagnosis(
+    db: AsyncSession,
+    report: LabReport,
+    disease_name: str,
+    stage: str,
+    confidence: float,
+) -> None:
+    """Auto-create or update a Diagnosis row on the visit linked to this report."""
+    if not report.visit_id:
+        return
+    marker = f"auto_lab_report_id={report.report_id}"
+    existing_q = await db.execute(
+        select(Diagnosis).where(
+            Diagnosis.visit_id == report.visit_id,
+            Diagnosis.disease_name == disease_name,
+            Diagnosis.notes.ilike(f"%{marker}%"),
+        )
+    )
+    existing_diag = existing_q.scalar_one_or_none()
+    diag_notes = f"Auto-confirmed from completed lab report. Stage: {stage}. ({marker})"
+    if existing_diag:
+        existing_diag.status = DiagnosisStatusEnum.CONFIRMED
+        existing_diag.confidence_score = confidence
+        existing_diag.notes = diag_notes
+        return
+    db.add(
+        Diagnosis(
+            visit_id=report.visit_id,
+            disease_name=disease_name,
+            diagnosis_date=report.report_date or datetime.utcnow(),
+            confidence_score=confidence,
+            ml_model_used="lab_report_auto",
+            status=DiagnosisStatusEnum.CONFIRMED,
+            notes=diag_notes,
+        )
+    )
+
+
+async def _sync_progression_from_report(db: AsyncSession, report: LabReport) -> None:
+    """Create/update DiseaseProgression when a lab report is completed."""
+    results_q = await db.execute(
+        select(LabTestResult).where(LabTestResult.report_id == report.report_id)
+    )
+    test_results = results_q.scalars().all()
+
+    disease_key = _infer_disease_key(report, test_results or [])
+    if not disease_key:
+        return
+
+    # ── Oral cancer: pull stage from the most recent OralCancerScreening for this report
+    if disease_key == "oral_cancer":
+        screening_q = await db.execute(
+            select(OralCancerScreening)
+            .where(OralCancerScreening.report_id == report.report_id)
+            .order_by(OralCancerScreening.created_at.desc())
+            .limit(1)
+        )
+        screening = screening_q.scalar_one_or_none()
+        if not screening:
+            # No scan uploaded yet — nothing to sync
+            return
+        stage = screening.progression_stage
+        confidence = float(screening.confidence_score) if screening.confidence_score else 0.7
+        disease_name = "oral_cancer"
+
+        # The /detect endpoint already created a DiseaseProgression row for this report.
+        # Find and update it (by screening_id or report_id reference in notes) instead of
+        # creating a duplicate.
+        report_id_str = str(report.report_id)
+        screening_id_str = str(screening.screening_id)
+        detect_existing_q = await db.execute(
+            select(DiseaseProgression).where(
+                DiseaseProgression.patient_id == report.patient_id,
+                DiseaseProgression.disease_name == "oral_cancer",
+                or_(
+                    DiseaseProgression.notes.ilike(f"%report_id={report_id_str}%"),
+                    DiseaseProgression.notes.ilike(f"%{screening_id_str}%"),
+                ),
+            )
+        )
+        detect_existing = detect_existing_q.scalar_one_or_none()
+        if detect_existing:
+            # Already exists from /detect — just update stage/confidence in case of re-scan
+            detect_existing.progression_stage = stage
+            detect_existing.confidence_score = confidence
+            await _auto_upsert_visit_diagnosis(db, report, disease_name, stage, confidence)
+            return
+        # Fall through to create via the shared upsert below
+    else:
+        if not test_results:
+            return
+        lookup = _as_lookup(test_results)
+        stage, confidence = _estimate_progression_stage(disease_key, lookup)
+        disease_name = _disease_name_from_key(disease_key)
+    marker = f"source_report_id={report.report_id}"
+    notes = (
+        f"Auto-generated from completed lab report ({marker}). "
+        f"Disease inferred from report/test names."
+    )
+
+    existing_q = await db.execute(
+        select(DiseaseProgression).where(
+            DiseaseProgression.patient_id == report.patient_id,
+            DiseaseProgression.disease_name == disease_name,
+            DiseaseProgression.notes.ilike(f"%{marker}%"),
+        )
+    )
+    existing = existing_q.scalar_one_or_none()
+
+    if existing:
+        existing.progression_stage = stage
+        existing.assessed_date = report.report_date or datetime.utcnow()
+        existing.confidence_score = confidence
+        existing.ml_model_used = "lab_report_auto_mapper_v1"
+        existing.notes = notes
+        await _auto_upsert_visit_diagnosis(db, report, disease_name, stage, confidence)
+        return
+
+    db.add(
+        DiseaseProgression(
+            patient_id=report.patient_id,
+            disease_name=disease_name,
+            progression_stage=stage,
+            assessed_date=report.report_date or datetime.utcnow(),
+            ml_model_used="lab_report_auto_mapper_v1",
+            confidence_score=confidence,
+            notes=notes,
+        )
+    )
+    await _auto_upsert_visit_diagnosis(db, report, disease_name, stage, confidence)
 
 
 @router.get("/patient-visits")
@@ -265,6 +523,11 @@ async def update_lab_report(
         update_data = report_update.dict(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_report, field, value)
+
+        # If this report is completed, sync progression timeline from its results.
+        status_value = getattr(db_report.status, "value", db_report.status)
+        if status_value == "completed":
+            await _sync_progression_from_report(db, db_report)
         
         await db.commit()
         await db.refresh(db_report)
@@ -353,9 +616,12 @@ async def create_lab_test_result(
         db_test_result = LabTestResult(report_id=report_id, **test_data)
         db.add(db_test_result)
         
-        # Auto-update report status to COMPLETED as soon as a result is added
-        if db_report.status != "completed":
-            db_report.status = "completed"
+        await db.flush()
+
+        # Only sync progression after the report has been explicitly marked completed.
+        status_value = getattr(db_report.status, "value", db_report.status)
+        if status_value == "completed":
+            await _sync_progression_from_report(db, db_report)
             
         await db.commit()
         await db.refresh(db_test_result)
@@ -504,6 +770,7 @@ async def get_lab(
 async def update_lab(
     lab_id: UUID,
     lab_update: LabUpdate,
+    _user=Depends(require_roles("admin")),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a lab"""
@@ -535,6 +802,7 @@ async def update_lab(
 @router.delete("/{lab_id}")
 async def delete_lab(
     lab_id: UUID,
+    _user=Depends(require_roles("admin")),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a lab"""
@@ -546,6 +814,25 @@ async def delete_lab(
         
         if not db_lab:
             raise HTTPException(status_code=404, detail="Lab not found")
+
+        # Lab accounts are created separately in the auth tables.
+        # When deleting the lab, also remove the matching lab login account.
+        # We match by email and also by the default username derived from that email,
+        # because the lab row itself does not store the auth username.
+        if db_lab.email:
+            derived_username = db_lab.email.split("@")[0]
+            derived_username = re.sub(r"[^a-zA-Z0-9_]", "", derived_username)
+            lab_users_result = await db.execute(
+                select(User).where(
+                    User.patient_id.is_(None),
+                    or_(
+                        User.email == db_lab.email,
+                        User.username == derived_username,
+                    ),
+                )
+            )
+            for lab_user in lab_users_result.scalars().unique().all():
+                await db.delete(lab_user)
         
         await db.delete(db_lab)
         await db.commit()

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.auth import User, Role, UserRole, RefreshToken
+from app.models.patient import Patient
 
 
 class AuthService:
@@ -178,6 +179,82 @@ class AuthService:
         if not self.verify_password(password, user.password_hash):
             return None
         return user
+
+    async def authenticate_patient_by_cnic(self, db: AsyncSession, cnic: str) -> Optional[User]:
+        patient_result = await db.execute(select(Patient).where(Patient.cnic == cnic))
+        patient = patient_result.scalar_one_or_none()
+        if not patient:
+            return None
+
+        await self.ensure_default_roles(db)
+        patient_role = await self.get_or_create_role(db, "patient")
+        user = await self._get_preferred_patient_user(db, patient.patient_id, patient_role.role_id)
+
+        if user and not user.is_active:
+            return None
+
+        if user is None:
+            email = await self._build_patient_login_email(db, patient)
+            username = f"patient_{str(patient.patient_id).replace('-', '')[:12]}"
+            user = User(
+                username=username,
+                email=email,
+                password_hash=self.hash_password(secrets.token_urlsafe(32)),
+                patient_id=patient.patient_id,
+                is_active=True,
+            )
+            db.add(user)
+            await db.flush()
+            db.add(UserRole(user_id=user.user_id, role_id=patient_role.role_id))
+            await db.commit()
+            await db.refresh(user)
+            return user
+
+        role_result = await db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user.user_id,
+                UserRole.role_id == patient_role.role_id,
+            )
+        )
+        if role_result.scalar_one_or_none() is None:
+            db.add(UserRole(user_id=user.user_id, role_id=patient_role.role_id))
+            await db.commit()
+
+        return user
+
+    async def _build_patient_login_email(self, db: AsyncSession, patient: Patient) -> str:
+        if patient.email:
+            existing = await db.execute(select(User).where(User.email == patient.email))
+            existing_user = existing.scalar_one_or_none()
+            if existing_user is None or existing_user.patient_id == patient.patient_id:
+                return patient.email
+        return f"patient-{patient.patient_id}@lifechain.local"
+
+    async def _get_preferred_patient_user(
+        self,
+        db: AsyncSession,
+        patient_id: UUID,
+        patient_role_id: UUID,
+    ) -> Optional[User]:
+        patient_user_result = await db.execute(
+            select(User)
+            .join(UserRole, User.user_id == UserRole.user_id)
+            .where(
+                User.patient_id == patient_id,
+                UserRole.role_id == patient_role_id,
+            )
+            .order_by(User.created_at.asc())
+        )
+        patient_user = patient_user_result.scalars().first()
+        if patient_user:
+            return patient_user
+
+        fallback_result = await db.execute(
+            select(User)
+            .where(User.patient_id == patient_id)
+            .order_by(User.created_at.asc())
+        )
+        return fallback_result.scalars().first()
 
 
 auth_service = AuthService()

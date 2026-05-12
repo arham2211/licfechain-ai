@@ -18,7 +18,7 @@ export function ProgressBar({
       {label && (
         <div className="mb-1.5 flex items-center justify-between text-xs">
           <span className="text-muted">{label}</span>
-          <span className="font-semibold tabular-nums">{Math.round(pct)}%</span>
+          <span className="font-extrabold tabular-nums text-primary-700 drop-shadow-sm">{Math.round(pct)}%</span>
         </div>
       )}
       <div className="progress-bar">
