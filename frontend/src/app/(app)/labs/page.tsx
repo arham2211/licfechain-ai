@@ -222,40 +222,33 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
       const isDoctor = userRoles.includes("doctor");
       const effectivePatientId = patientId || (isPatient ? (user?.patient_id || "") : "");
-      const reportQueryParts = [`skip=0`, `limit=100`];
+      const reportQueryParts = [`skip=0`, `limit=1000`];
       if (effectivePatientId) reportQueryParts.push(`patient_id=${encodeURIComponent(effectivePatientId)}`);
       if (directLabId) reportQueryParts.push(`lab_id=${encodeURIComponent(directLabId)}`);
+      // For doctors without a specific patient selected, filter server-side by their visits
+      if (isDoctor && user?.patient_id && !effectivePatientId) {
+        reportQueryParts.push(`doctor_patient_id=${encodeURIComponent(user.patient_id)}`);
+      }
       if (reportStatusFilter !== "all") reportQueryParts.push(`status=${encodeURIComponent(reportStatusFilter)}`);
       const reportsUrl = `/labs/reports?${reportQueryParts.join("&")}`;
 
       let r = await api.request<Report[]>(reportsUrl);
       if (requestId !== loadAllRequestId.current) return;
 
-      if (isLabOnlySession && !directLabId) {
-        // Email-based match already handled in resolveLoggedInLabId; nothing more to infer
-      }
-
-      // For doctors: filter to only reports of patients who visited them, and build name map
-      if (isDoctor && user?.patient_id) {
-        try {
-          type VisitRow = { patient_id: string; first_name?: string; last_name?: string };
-          const visits = await api.request<VisitRow[]>(`/visits?doctor_patient_id=${user.patient_id}&skip=0&limit=500`);
-          if (requestId !== loadAllRequestId.current) return;
-          const doctorPatientIds = new Set(visits.map((v) => v.patient_id));
-          r = r.filter((rep) => doctorPatientIds.has(rep.patient_id));
-          // Build name map from patients list
-          const nameMap: Record<string, string> = {};
-          await Promise.all(
-            Array.from(doctorPatientIds).map(async (pid) => {
-              try {
-                const p = await api.request<{ first_name: string; last_name: string }>(`/patients/${pid}`);
-                nameMap[pid] = `${p.first_name} ${p.last_name}`;
-              } catch { nameMap[pid] = pid.slice(0, 8); }
-            })
-          );
-          if (requestId !== loadAllRequestId.current) return;
-          setPatientNameMap(nameMap);
-        } catch { /* silently fail name lookup */ }
+      // For doctors: build patient name map from the returned reports
+      if (isDoctor && user?.patient_id && !effectivePatientId) {
+        const doctorPatientIds = new Set(r.map((rep) => rep.patient_id));
+        const nameMap: Record<string, string> = {};
+        await Promise.all(
+          Array.from(doctorPatientIds).map(async (pid) => {
+            try {
+              const p = await api.request<{ first_name: string; last_name: string }>(`/patients/${pid}`);
+              nameMap[pid] = `${p.first_name} ${p.last_name}`;
+            } catch { nameMap[pid] = pid.slice(0, 8); }
+          })
+        );
+        if (requestId !== loadAllRequestId.current) return;
+        setPatientNameMap(nameMap);
       }
 
       // For lab users: build patient info map (name + CNIC) for all reports
@@ -1387,6 +1380,78 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
         </div>
       )}
 
+      {/* Doctor view: all reports for patients who visited them */}
+      {userRoles.includes("doctor") && !isPatient && !patientId && (
+        <div className="card p-0 overflow-x-auto overflow-visible relative">
+          <div className="flex flex-col gap-3 border-b border-border px-5 py-3 md:flex-row md:items-center md:justify-between">
+            <div className="font-semibold gradient-text">
+              Patient Lab Reports ({filteredReports.length})
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                className="w-56 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder-slate-400 transition focus:border-primary/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Search patient or type..."
+                value={labReportSearch}
+                onChange={(e) => setLabReportSearch(e.target.value)}
+              />
+              <div className="inline-flex items-center gap-1 rounded-full border border-border bg-slate-100/40 p-1">
+                <button type="button" onClick={() => setReportStatusFilter("all")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "all" ? "bg-white text-primary shadow-sm" : "text-muted hover:text-foreground"}`}>
+                  All
+                </button>
+                <button type="button" onClick={() => setReportStatusFilter("pending")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "pending" ? "bg-warning/20 text-warning" : "text-muted hover:text-foreground"}`}>
+                  Pending
+                </button>
+                <button type="button" onClick={() => setReportStatusFilter("completed")}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${reportStatusFilter === "completed" ? "bg-success/20 text-success" : "text-muted hover:text-foreground"}`}>
+                  Completed
+                </button>
+              </div>
+            </div>
+          </div>
+          <table className="w-full min-w-150 text-sm">
+            <thead className="table-header">
+              <tr>
+                <th className="px-4 py-3 text-left">Patient</th>
+                <th className="px-4 py-3 text-left">Type</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-left">Date</th>
+                <th className="px-4 py-3 text-left">Laboratory</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReports
+                .filter((r) => {
+                  if (!labReportSearch.trim()) return true;
+                  const q = labReportSearch.trim().toLowerCase();
+                  const pName = (patientNameMap[r.patient_id] ?? "").toLowerCase();
+                  const rType = r.report_type.replace(/_/g, " ").toLowerCase();
+                  return pName.includes(q) || rType.includes(q);
+                })
+                .map((r) => (
+                  <tr key={r.report_id}
+                    className={`table-row cursor-pointer transition ${viewingReport?.report_id === r.report_id ? "bg-primary/5" : "hover:bg-primary/5"}`}
+                    onClick={() => selectReport(r)}>
+                    <td className="px-4 py-3 font-medium">{patientNameMap[r.patient_id] ?? r.patient_id.slice(0, 8)}</td>
+                    <td className="px-4 py-3 capitalize">{r.report_type.replace(/_/g, " ")}</td>
+                    <td className="px-4 py-3">
+                      <span className={`badge ${r.status === "completed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{String(r.report_date).slice(0, 10)}</td>
+                    <td className="px-4 py-3">{labs.find((l) => l.lab_id === r.lab_id)?.lab_name ?? "-"}</td>
+                  </tr>
+                ))}
+              {filteredReports.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No lab reports found for your patients.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Professional View Report Modal */}
       {viewModalOpen && viewingReport && (
         <div className="modal-overlay z-[100] p-4 flex items-center justify-center overflow-hidden">
@@ -1412,6 +1477,9 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                 </div>
                 <div className="md:text-right">
                   <h1 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{tr("labReport")}</h1>
+                  {patientNameMap[viewingReport.patient_id] && (
+                    <p className="text-sm text-slate-700 font-semibold">Patient: {patientNameMap[viewingReport.patient_id]}</p>
+                  )}
                   <p className="text-sm text-slate-500">{tr("idLabel")}: {viewingReport.report_id.slice(0, 8).toUpperCase()}</p>
                   <p className="text-sm text-slate-500">{tr("date")}: {new Date(viewingReport.report_date).toLocaleDateString()}</p>
                   <div className="mt-2">

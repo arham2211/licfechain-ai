@@ -431,6 +431,7 @@ async def get_lab_reports(
     status: Optional[str] = Query(None, description="Filter by status"),
     start_date: Optional[date] = Query(None, description="Filter by start date"),
     end_date: Optional[date] = Query(None, description="Filter by end date"),
+    doctor_patient_id: Optional[UUID] = Query(None, description="Filter by doctor: returns reports for all patients who visited this doctor"),
     lang: str = Depends(get_translation_language),
     db: AsyncSession = Depends(get_db)
 ):
@@ -438,6 +439,16 @@ async def get_lab_reports(
     try:
         query = select(LabReport)
         
+        if doctor_patient_id:
+            # Subquery: distinct patient IDs who had at least one visit with this doctor
+            visited_patients_subq = (
+                select(DoctorVisit.patient_id)
+                .where(DoctorVisit.doctor_patient_id == doctor_patient_id)
+                .distinct()
+                .scalar_subquery()
+            )
+            query = query.where(LabReport.patient_id.in_(visited_patients_subq))
+
         if patient_id:
             query = query.where(LabReport.patient_id == patient_id)
         
