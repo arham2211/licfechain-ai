@@ -24,6 +24,7 @@ for p in (PROJECT_ROOT, MODEL_TRAINING_DIR):
 from train_models import ProgressionBiLSTM
 from app.services.inference_service import InferenceService
 from app.services.multi_disease_inference import multi_disease_inference as _multi_disease_inference_singleton
+from app.core.test_reference_ranges import get_progression_tests_for_disease
 from app.models import (
     Patient, DoctorVisit, LabTestResult, LabReport, 
     DiseaseProgression, FamilyDiseaseHistory, FamilyRelationship,
@@ -49,6 +50,239 @@ class ProgressionReportService:
         self.inference.load_models()
         # Use the shared singleton — models are loaded lazily on first use
         self.multi_inference = _multi_disease_inference_singleton
+
+    def _get_relevant_tests_for_disease(self, disease_name: str) -> List[str]:
+        return list(get_progression_tests_for_disease(disease_name))
+
+    def _filter_lab_tests_for_disease(self, disease_name: str, lab_tests: List) -> List:
+        relevant_tests = {name.lower() for name in self._get_relevant_tests_for_disease(disease_name)}
+        if not relevant_tests:
+            return []
+        return [test for test in lab_tests if str(test[0]).lower() in relevant_tests]
+
+    def _infer_stage_from_lookup(self, disease_name: str, values: Dict[str, float]) -> Optional[str]:
+        """Infer a stage from normalized lab-value lookup for one disease snapshot."""
+        disease_lower = disease_name.lower().strip()
+
+        if "parathyroid" in disease_lower:
+            pth = values.get("pth")
+            calcium = values.get("calcium")
+            phosphorus = values.get("phosphorus")
+            vitamin_d = values.get("vitamin_d")
+            egfr = values.get("egfr")
+            creatinine = values.get("creatinine")
+
+            if pth is None and calcium is None and phosphorus is None and vitamin_d is None:
+                return None
+
+            if pth is not None and pth < 15 and calcium is not None and calcium < 8.5:
+                return "Possible Hypoparathyroidism"
+            if pth is not None and pth > 65:
+                if calcium is not None and calcium > 10.2:
+                    return "Possible Primary Hyperparathyroidism"
+                if (
+                    (vitamin_d is not None and vitamin_d < 30) or
+                    (phosphorus is not None and phosphorus > 4.5) or
+                    (egfr is not None and egfr < 60) or
+                    (creatinine is not None and creatinine > 1.3)
+                ):
+                    return "Possible Secondary Hyperparathyroidism"
+                return "Possible Secondary Hyperparathyroidism"
+            if calcium is not None and calcium > 10.2:
+                return "Indeterminate Parathyroid Pattern"
+            if calcium is not None and calcium < 8.5:
+                return "Possible Hypoparathyroidism"
+            if (
+                (vitamin_d is not None and vitamin_d < 30) or
+                (phosphorus is not None and phosphorus > 4.5)
+            ):
+                return "Indeterminate Parathyroid Pattern"
+            return "Normal Parathyroid Function"
+
+        if "diabet" in disease_lower:
+            hba1c = values.get("hba1c")
+            fasting_glucose = values.get("fasting_glucose")
+            if hba1c is None and fasting_glucose is None:
+                return None
+            if (hba1c is not None and hba1c >= 8.0) or (fasting_glucose is not None and fasting_glucose >= 180):
+                return "Uncontrolled"
+            if (hba1c is not None and hba1c >= 6.5) or (fasting_glucose is not None and fasting_glucose >= 126):
+                return "Controlled"
+            if (hba1c is not None and hba1c >= 5.7) or (fasting_glucose is not None and fasting_glucose >= 100):
+                return "Prediabetes"
+            return "Normal"
+
+        if "anemia" in disease_lower or "iron" in disease_lower:
+            hemoglobin = values.get("hemoglobin")
+            ferritin = values.get("ferritin")
+            if hemoglobin is None and ferritin is None:
+                return None
+            if hemoglobin is not None:
+                if hemoglobin < 8:
+                    return "Severe Iron Deficiency Anemia"
+                if hemoglobin < 11:
+                    return "Moderate Iron Deficiency Anemia"
+                if hemoglobin < 12:
+                    return "Mild Iron Deficiency Anemia"
+            if ferritin is not None and ferritin < 15:
+                return "Iron Deficiency Without Anemia"
+            return "Normal"
+
+        if "ckd" in disease_lower or "kidney" in disease_lower or "renal" in disease_lower:
+            egfr = values.get("egfr")
+            uacr = values.get("uacr")
+            creatinine = values.get("creatinine")
+            if egfr is None and uacr is None and creatinine is None:
+                return None
+            if egfr is not None:
+                if egfr < 15:
+                    return "End Stage Renal Disease (ESRD)"
+                if egfr < 30:
+                    return "Advanced CKD Stage 4"
+                if egfr < 45:
+                    return "Moderate CKD Stage 3b"
+                if egfr < 60:
+                    return "Moderate CKD Stage 3a"
+                if egfr < 90:
+                    return "Early CKD Stage 2"
+                if (uacr is not None and uacr > 30) or (creatinine is not None and creatinine > 1.3):
+                    return "Early CKD Stage 1"
+                return "Normal Kidney Function"
+            if (uacr is not None and uacr > 30) or (creatinine is not None and creatinine > 1.3):
+                return "Early CKD Stage 1"
+            return "Normal Kidney Function"
+
+        return None
+
+    def _infer_stage_from_lab_tests(self, disease_name: str, lab_tests: List) -> Optional[Dict[str, Any]]:
+        """
+        Infer a disease stage directly from recent disease-specific lab markers.
+        Returns None when the available labs are insufficient to infer a stage.
+        """
+        disease_specific_lab_tests = self._filter_lab_tests_for_disease(disease_name, lab_tests)
+        if not disease_specific_lab_tests:
+            return None
+
+        latest_values: Dict[str, float] = {}
+        latest_date: Optional[datetime] = None
+
+        for row in disease_specific_lab_tests:
+            test_name = str(row[0]).lower()
+            try:
+                test_value = float(row[1])
+            except (TypeError, ValueError):
+                continue
+
+            test_date = row[3] if len(row) > 3 else None
+            if test_name not in latest_values:
+                latest_values[test_name] = test_value
+            if isinstance(test_date, datetime) and (latest_date is None or test_date > latest_date):
+                latest_date = test_date
+
+        if not latest_values:
+            return None
+
+        stage = self._infer_stage_from_lookup(disease_name, latest_values)
+        if stage is None:
+            return None
+
+        return {
+            "stage": stage,
+            "assessed_date": latest_date,
+            "confidence_score": 0.78,
+            "source": "lab_inference",
+        }
+
+    def _build_inferred_lab_timeline(self, disease_name: str, lab_rows: List) -> List[Dict[str, Any]]:
+        """Infer one progression point per lab-report date from disease-specific lab markers."""
+        disease_specific_lab_tests = self._filter_lab_tests_for_disease(disease_name, lab_rows)
+        if not disease_specific_lab_tests:
+            return []
+
+        grouped_by_date: Dict[str, Dict[str, Any]] = {}
+        for row in disease_specific_lab_tests:
+            test_name = str(row[0]).lower()
+            try:
+                test_value = float(row[1])
+            except (TypeError, ValueError):
+                continue
+
+            report_date = row[3] if len(row) > 3 else None
+            if report_date is None:
+                continue
+
+            key = report_date.isoformat()
+            bucket = grouped_by_date.setdefault(
+                key,
+                {"date": report_date, "values": {}, "report_types": set(), "tests_used": []},
+            )
+            bucket["values"][test_name] = test_value
+            report_type = row[4] if len(row) > 4 else None
+            unit = row[5] if len(row) > 5 else None
+            if report_type:
+                bucket["report_types"].add(str(report_type))
+            bucket["tests_used"].append({
+                "name": test_name,
+                "value": test_value,
+                "unit": unit,
+            })
+
+        inferred_points: List[Dict[str, Any]] = []
+        for bucket in grouped_by_date.values():
+            stage = self._infer_stage_from_lookup(disease_name, bucket["values"])
+            if not stage:
+                continue
+            assessed_date = bucket["date"]
+            inferred_points.append({
+                "date": assessed_date.isoformat(),
+                "progression_stage": stage,
+                "severity_score": self._calculate_severity_score(stage, disease_name),
+                "confidence_score": 0.78,
+                "notes": "Derived from lab report markers",
+                "visit_date": assessed_date.isoformat(),
+                "visit_type": "lab_inference",
+                "report_type": ", ".join(sorted(bucket["report_types"])) if bucket["report_types"] else None,
+                "doctor_notes": None,
+                "medications": [],
+                "tests_used": bucket["tests_used"],
+            })
+
+        inferred_points.sort(key=lambda item: item["date"])
+        return inferred_points
+
+    def _build_lab_context_by_date(self, disease_name: str, lab_rows: List) -> Dict[str, Dict[str, Any]]:
+        """Group disease-relevant report/test details by report date for tooltip display."""
+        disease_specific_lab_tests = self._filter_lab_tests_for_disease(disease_name, lab_rows)
+        context_by_date: Dict[str, Dict[str, Any]] = {}
+
+        for row in disease_specific_lab_tests:
+            report_date = row[3] if len(row) > 3 else None
+            if report_date is None:
+                continue
+
+            key = report_date.isoformat()
+            bucket = context_by_date.setdefault(
+                key,
+                {"report_types": set(), "tests_used": []},
+            )
+
+            report_type = row[4] if len(row) > 4 else None
+            unit = row[5] if len(row) > 5 else None
+            if report_type:
+                bucket["report_types"].add(str(report_type))
+
+            try:
+                test_value = float(row[1])
+            except (TypeError, ValueError):
+                continue
+
+            bucket["tests_used"].append({
+                "name": str(row[0]).lower(),
+                "value": test_value,
+                "unit": unit,
+            })
+
+        return context_by_date
     
     def _calculate_severity_score(self, progression_stage: str, disease_name: str = None) -> float:
         """
@@ -330,6 +564,26 @@ class ProgressionReportService:
             
             result = await db.execute(query)
             rows = result.all()
+
+            lab_query = select(
+                LabTestResult.test_name,
+                LabTestResult.test_value,
+                LabTestResult.is_abnormal,
+                LabReport.report_date,
+                LabReport.report_type,
+                LabTestResult.unit
+            ).join(
+                LabReport, LabTestResult.report_id == LabReport.report_id
+            ).where(
+                and_(
+                    LabReport.patient_id == patient_id,
+                    LabReport.report_date >= start_date
+                )
+            ).order_by(LabReport.report_date.desc())
+            lab_result = await db.execute(lab_query)
+            lab_rows = lab_result.all()
+            inferred_timeline = self._build_inferred_lab_timeline(disease_name, lab_rows)
+            lab_context_by_date = self._build_lab_context_by_date(disease_name, lab_rows)
             
             timeline = []
             for row in rows:
@@ -373,9 +627,43 @@ class ProgressionReportService:
                     'notes': row[2],
                     'visit_date': row[4].isoformat() if row[4] else None,
                     'visit_type': row[5],
+                    'report_type': ", ".join(sorted(lab_context_by_date.get(date.isoformat(), {}).get('report_types', set()))) or None,
                     'doctor_notes': row[6],
-                    'medications': medications
+                    'medications': medications,
+                    'tests_used': lab_context_by_date.get(date.isoformat(), {}).get('tests_used', []),
                 })
+
+            if inferred_timeline:
+                inferred_by_date = {item["date"]: item for item in inferred_timeline if item.get("date")}
+                cleaned_timeline = []
+
+                for existing_point in timeline:
+                    point_date = existing_point.get("date")
+                    if not point_date:
+                        continue
+
+                    # Prefer report-derived inference when we can explain the point from report data.
+                    if point_date in inferred_by_date:
+                        continue
+
+                    has_report_context = bool(existing_point.get("tests_used"))
+                    if has_report_context:
+                        cleaned_timeline.append(existing_point)
+                        continue
+
+                    # Suppress legacy lab-driven rows that we cannot back with report/test context.
+                    if existing_point.get("notes", "").startswith("Auto-generated from completed lab report"):
+                        continue
+
+                    # For lab-driven diseases, if we have report-backed inferred points, hide unmatched legacy points.
+                    if self._get_relevant_tests_for_disease(disease_name):
+                        continue
+
+                    cleaned_timeline.append(existing_point)
+
+                timeline = cleaned_timeline + list(inferred_by_date.values())
+
+            timeline.sort(key=lambda item: item.get('date') or '')
             
             return timeline
             
@@ -419,17 +707,7 @@ class ProgressionReportService:
             
             # Get recent lab values for risk assessment using SQLAlchemy
             recent_date = datetime.now() - timedelta(days=90)
-            disease_lower = disease_name.lower().strip()
-
-            # Disease-specific marker set for risk-factor extraction
-            if 'parathyroid' in disease_lower:
-                relevant_tests = ['pth', 'calcium', 'phosphorus', 'vitamin_d', 'creatinine', 'egfr']
-            elif 'ckd' in disease_lower or 'kidney' in disease_lower:
-                relevant_tests = ['creatinine', 'egfr', 'uacr', 'bun', 'potassium', 'phosphorus', 'pth']
-            elif 'anemia' in disease_lower or 'ida' in disease_lower:
-                relevant_tests = ['hemoglobin', 'ferritin', 'serum_iron', 'tibc', 'transferrin_saturation', 'mcv']
-            else:
-                relevant_tests = ['fasting_glucose', 'hba1c', 'hdl', 'ldl', 'triglycerides', 'bmi']
+            relevant_tests = self._get_relevant_tests_for_disease(disease_name)
             
             lab_query = select(
                 LabTestResult.test_name,
@@ -459,9 +737,8 @@ class ProgressionReportService:
             # Analyze lab values for risk factors
             lab_values = {}
             for row in lab_rows:
-                test_name = row[0]
+                test_name = str(row[0]).lower()
                 test_value = float(row[1])
-                is_abnormal = row[4]
                 
                 if test_name not in lab_values:
                     lab_values[test_name] = []
@@ -1157,6 +1434,33 @@ Provide recommendations as a numbered list."""
             
             lab_result = await db.execute(lab_query)
             lab_tests = lab_result.all()
+
+            for disease in all_diseases:
+                inferred_stage = self._infer_stage_from_lab_tests(disease, lab_tests)
+                if not inferred_stage:
+                    continue
+
+                stored_status = current_status.get(disease)
+                inferred_date = inferred_stage.get("assessed_date")
+                stored_date = None
+                if stored_status and stored_status.get("assessed_date"):
+                    try:
+                        stored_date = datetime.fromisoformat(stored_status["assessed_date"])
+                    except ValueError:
+                        stored_date = None
+
+                if (
+                    stored_status is None or
+                    stored_date is None or
+                    inferred_date is None or
+                    inferred_date >= stored_date or
+                    stored_status.get("current_stage", "").lower().strip() != inferred_stage["stage"].lower().strip()
+                ):
+                    current_status[disease] = {
+                        'current_stage': inferred_stage["stage"],
+                        'assessed_date': inferred_date.isoformat() if inferred_date else datetime.now().isoformat(),
+                        'confidence': inferred_stage.get("confidence_score"),
+                    }
             
             # Make predictions for each disease
             predictions = {}
@@ -1256,9 +1560,12 @@ Provide recommendations as a numbered list."""
         """Rule-based prediction when ML model can't be used — uses disease-specific stage names"""
         current_stage = current_status.get('current_stage', 'Unknown')
 
-        # Analyze lab trends
-        abnormal_count = sum(1 for test in lab_tests if test[2])  # is_abnormal
-        total_tests = len(lab_tests)
+        disease_specific_lab_tests = self._filter_lab_tests_for_disease(disease, lab_tests)
+        tests_for_scoring = disease_specific_lab_tests or lab_tests
+
+        # Analyze lab trends using only disease-relevant tests when available
+        abnormal_count = sum(1 for test in tests_for_scoring if test[2])  # is_abnormal
+        total_tests = len(tests_for_scoring)
         abnormal_ratio = abnormal_count / total_tests if total_tests > 0 else 0
 
         disease_lower = disease.lower().strip()
@@ -1468,6 +1775,7 @@ Provide recommendations as a numbered list."""
     async def get_lab_measurements_timeline(
         self,
         patient_id: UUID,
+        disease_name: Optional[str] = None,
         test_name: Optional[str] = None,
         months_back: int = 12,
         db: AsyncSession = None
@@ -1496,6 +1804,12 @@ Provide recommendations as a numbered list."""
                 )
             )
             
+            # Filter by disease-specific test set when requested
+            if disease_name and not test_name:
+                relevant_tests = self._get_relevant_tests_for_disease(disease_name)
+                if relevant_tests:
+                    query = query.where(func.lower(LabTestResult.test_name).in_([test.lower() for test in relevant_tests]))
+
             # Filter by test name if provided
             if test_name:
                 query = query.where(LabTestResult.test_name.ilike(f"%{test_name}%"))
@@ -1508,6 +1822,7 @@ Provide recommendations as a numbered list."""
             if not rows:
                 return {
                     'patient_id': str(patient_id),
+                    'disease_name': disease_name,
                     'test_name': test_name,
                     'months_back': months_back,
                     'measurements': {},
@@ -1546,6 +1861,7 @@ Provide recommendations as a numbered list."""
             
             return {
                 'patient_id': str(patient_id),
+                'disease_name': disease_name,
                 'test_name': test_name,
                 'months_back': months_back,
                 'measurements': measurements_by_test,
@@ -1558,6 +1874,7 @@ Provide recommendations as a numbered list."""
             traceback.print_exc()
             return {
                 'patient_id': str(patient_id),
+                'disease_name': disease_name,
                 'error': str(e),
                 'measurements': {},
                 'available_tests': []

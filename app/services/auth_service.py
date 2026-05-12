@@ -245,16 +245,7 @@ class AuthService:
             )
             .order_by(User.created_at.asc())
         )
-        patient_user = patient_user_result.scalars().first()
-        if patient_user:
-            return patient_user
-
-        fallback_result = await db.execute(
-            select(User)
-            .where(User.patient_id == patient_id)
-            .order_by(User.created_at.asc())
-        )
-        return fallback_result.scalars().first()
+        return patient_user_result.scalars().first()
 
 
 auth_service = AuthService()

@@ -109,6 +109,7 @@ export default function PatientDetailPage() {
   const user = getUser();
   const userRoles = user?.roles ?? [];
   const canEdit = userRoles.includes("admin");
+  const isOwnPatientPortalView = userRoles.includes("patient") && user?.patient_id === patientId;
 
   /* Patient state */
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -141,9 +142,11 @@ export default function PatientDetailPage() {
 
   useEffect(() => {
     loadPatient();
-    loadFamily();
+    if (!isOwnPatientPortalView) {
+      loadFamily();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientId, language]);
+  }, [patientId, language, isOwnPatientPortalView]);
 
   /* Search debounce */
   useEffect(() => {
@@ -499,8 +502,9 @@ export default function PatientDetailPage() {
       </motion.div>
 
       {/* ── Family Tree Section ── */}
-      <motion.div variants={fadeUp}
-        className="rounded-3xl border border-white/70 bg-white/78 p-6 shadow-[0_20px_60px_rgba(2,132,199,0.08)] backdrop-blur-xl">
+      {!isOwnPatientPortalView && (
+        <motion.div variants={fadeUp}
+          className="rounded-3xl border border-white/70 bg-white/78 p-6 shadow-[0_20px_60px_rgba(2,132,199,0.08)] backdrop-blur-xl">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
@@ -645,7 +649,8 @@ export default function PatientDetailPage() {
             )}
           </div>
         )}
-      </motion.div>
+        </motion.div>
+      )}
 
       {/* ═══════ ADD MEMBER WIZARD ═══════ */}
       <AnimatePresence>

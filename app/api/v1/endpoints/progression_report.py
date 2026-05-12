@@ -217,6 +217,7 @@ async def predict_future_progression(
 @router.get("/patient/{patient_id}/lab-measurements-timeline")
 async def get_lab_measurements_timeline(
     patient_id: UUID,
+    disease_name: Optional[str] = Query(None, description="Filter to the tests relevant for a disease (e.g., 'diabetes', 'ckd')"),
     test_name: Optional[str] = Query(None, description="Filter by specific test name (e.g., 'hba1c', 'glucose'). If not provided, returns all tests"),
     months_back: int = Query(12, ge=1, le=60, description="Number of months to look back"),
     lang: str = Depends(get_translation_language),
@@ -235,6 +236,7 @@ async def get_lab_measurements_timeline(
         # Get lab measurements timeline
         timeline_data = await progression_service.get_lab_measurements_timeline(
             patient_id=patient_id,
+            disease_name=disease_name,
             test_name=test_name,
             months_back=months_back,
             db=db

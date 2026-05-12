@@ -16,6 +16,8 @@ import {
   Shield,
 } from "lucide-react";
 import { login, loginWithCnic } from "@/lib/api-client";
+import { clearSession } from "@/lib/auth-store";
+import type { RoleName, UserProfile } from "@/lib/types";
 
 const floatingParticles = [
   { top: "12%", left: "18%", duration: 3.2, delay: 0.2 },
@@ -30,6 +32,26 @@ const patientSamples = [
   { label: "Sarah", cnic: "42201-1234567-8" },
   { label: "Arham", cnic: "42101-8765432-1" },
 ];
+
+const STAFF_ROLES: RoleName[] = ["admin", "doctor", "lab"];
+
+function canAccessSelectedPortal(
+  loginMethod: "patient" | "doctor" | "lab" | "admin",
+  user: UserProfile,
+) {
+  if (loginMethod === "patient") {
+    return user.roles.includes("patient") && !user.roles.some((role) => STAFF_ROLES.includes(role));
+  }
+
+  return user.roles.includes(loginMethod);
+}
+
+function getRoleMismatchMessage(loginMethod: "patient" | "doctor" | "lab" | "admin") {
+  if (loginMethod === "patient") {
+    return "This CNIC does not belong to a patient-only portal account.";
+  }
+  return `These credentials do not belong to the ${loginMethod} portal.`;
+}
 
 export default function SignInPage() {
   const [loginMethod, setLoginMethod] = useState<"patient" | "doctor" | "lab" | "admin">("patient");
@@ -76,10 +98,18 @@ export default function SignInPage() {
     setLoading(true);
     try {
       if (isPatientLogin) {
-        await loginWithCnic(cnic);
+        const { me } = await loginWithCnic(cnic);
+        if (!canAccessSelectedPortal(loginMethod, me)) {
+          clearSession();
+          throw new Error(getRoleMismatchMessage(loginMethod));
+        }
         router.push("/dashboard");
       } else {
-        await login(identifier, password);
+        const { me } = await login(identifier, password);
+        if (!canAccessSelectedPortal(loginMethod, me)) {
+          clearSession();
+          throw new Error(getRoleMismatchMessage(loginMethod));
+        }
         router.push("/dashboard");
       }
     } catch (err) {

@@ -80,6 +80,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
 
   const canCreateLab = userRoles.some((r) => ["admin", "lab"].includes(r));
   const canCreateReport = userRoles.some((r) => ["admin", "lab", "doctor"].includes(r));
+  const canEnterReportResults = userRoles.some((r) => ["admin", "lab"].includes(r));
   const canManageLabs = userRoles.includes("admin");
 
   const [labs, setLabs] = useState<Lab[]>([]);
@@ -694,7 +695,19 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
             )}
             {!isPatient && !userRoles.includes("lab") && (
               <div className="flex items-center gap-2 overflow-visible relative z-40">
-                <PatientSearch onSelect={setPatientId} className="w-64" />
+                {userRoles.includes("admin") && showLabsSection ? (
+                  <input
+                    className="input w-64"
+                    placeholder="Search labs by name"
+                    value={labSearch}
+                    onChange={(e) => setLabSearch(e.target.value)}
+                  />
+                ) : (
+                  <PatientSearch
+                    onSelect={setPatientId}
+                    className="w-64"
+                  />
+                )}
                 {showLabsSection && canCreateLab && <button className="btn-primary text-sm whitespace-nowrap" onClick={() => { setLabForm({ lab_name: "", lab_location: "", accreditation_number: "", phone: "", email: "", username: "", password: generatePassword() }); setLabError(null); setShowCreateLab(true); }}><Plus size={16} /> {tr("newLab")}</button>}
               </div>
             )}
@@ -1531,7 +1544,7 @@ export function LabsPageContent({ forcedSection }: LabsPageContentProps = {}) {
                 </div>
 
                 {/* Add Result Section (Only for Lab/Admin) */}
-                {canCreateReport && (
+                {canEnterReportResults && (
                   <div className="no-print bg-slate-50 rounded-xl p-6 border border-slate-200">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="font-bold flex items-center gap-2"><Plus size={16} /> {tr("addTestResult")}</h4>

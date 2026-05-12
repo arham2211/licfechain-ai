@@ -133,6 +133,10 @@ def _estimate_progression_stage(disease_key: str, lookup: dict[str, float]) -> t
     if disease_key == "parathyroid":
         pth = _first_value(lookup, ["pth", "parathyroid_hormone"])
         calcium = _first_value(lookup, ["calcium", "ca"])
+        phosphorus = _first_value(lookup, ["phosphorus", "phosphate"])
+        vitamin_d = _first_value(lookup, ["vitamin_d", "vitamin_d_25_oh"])
+        egfr = _first_value(lookup, ["egfr", "e_gfr"])
+        creatinine = _first_value(lookup, ["creatinine", "serum_creatinine"])
         if pth is not None and calcium is not None:
             if pth > 65 and calcium > 10.2:
                 return "Primary Hyperparathyroidism", 0.86
@@ -141,6 +145,22 @@ def _estimate_progression_stage(disease_key: str, lookup: dict[str, float]) -> t
             if pth < 15:
                 return "Hypoparathyroidism", 0.83
             return "Normal", 0.8
+        if pth is not None:
+            if pth < 15:
+                return "Hypoparathyroidism", 0.81
+            if pth > 65:
+                if (
+                    (vitamin_d is not None and vitamin_d < 30) or
+                    (phosphorus is not None and phosphorus > 4.5) or
+                    (egfr is not None and egfr < 60) or
+                    (creatinine is not None and creatinine > 1.3)
+                ):
+                    return "Secondary Hyperparathyroidism", 0.84
+                return "Secondary Hyperparathyroidism", 0.82
+        if calcium is not None and calcium > 10.2:
+            return "Primary Hyperparathyroidism", 0.72
+        if calcium is not None and calcium < 8.5:
+            return "Hypoparathyroidism", 0.72
         return "Normal", 0.6
 
     return "Stable", 0.5

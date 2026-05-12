@@ -21,6 +21,8 @@ type ProgressionPoint = {
   progression_stage: string;
   severity_score: number;
   confidence_score: number | null;
+  report_type?: string | null;
+  tests_used?: Array<{ name: string; value: number; unit?: string | null }>;
   medications?: Array<{ name: string, dosage: string }>;
   visit_type?: string;
   doctor_notes?: string;
@@ -117,7 +119,7 @@ export default function ReportsPage() {
         api.request<RiskAssessment>(`/reports/patient/${encodeURIComponent(patientId)}/risk-assessment`).catch(() => null),
         api.request<Recommendations>(`/reports/patient/${encodeURIComponent(patientId)}/recommendations`).catch(() => null),
         api.request<FuturePrediction>(`/reports/patient/${encodeURIComponent(patientId)}/predict-progression?months_ahead=6`, { method: "POST" }).catch(() => null),
-        api.request<LabTimeline>(`/reports/patient/${encodeURIComponent(patientId)}/lab-measurements-timeline?months_back=12`).catch(() => null),
+        api.request<LabTimeline>(`/reports/patient/${encodeURIComponent(patientId)}/lab-measurements-timeline?disease_name=${encodeURIComponent(disease)}&months_back=12`).catch(() => null),
       ]);
       if (requestId !== loadRequestId.current) return;
       const textsToTranslate = [
@@ -361,7 +363,7 @@ export default function ReportsPage() {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
-        <div className="bg-white p-4 rounded-xl shadow-2xl border border-slate-100 min-w-[200px]">
+        <div className="bg-white p-4 rounded-xl shadow-2xl border border-slate-100 min-w-[240px]">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
             {data.isPredicted ? tr("aiProjection") : `${tr("clinicalRecord")}: ${String(label).slice(0, 10)}`}
           </p>
@@ -374,24 +376,40 @@ export default function ReportsPage() {
             <span className="text-xs px-1.5 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">{tr("severityShort")}: {data.severity_score}</span>
           </div>
 
-          {!data.isPredicted && data.medications && data.medications.length > 0 && (
+          {!data.isPredicted && (
             <div className="mt-3 pt-3 border-t border-slate-50">
-              <p className="text-[10px] font-bold text-primary uppercase mb-2">{tr("medicationsAtThisStage")}:</p>
-              <div className="space-y-1.5">
-                {data.medications.map((m: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-slate-700">{m.name}</span>
-                    <span className="text-slate-400 font-mono">{m.dosage}</span>
+              <div className="space-y-2 text-xs text-slate-600">
+                <div className="flex justify-between gap-4">
+                  <span className="font-bold uppercase text-slate-400">Date</span>
+                  <span className="font-semibold text-slate-700">{String(label).slice(0, 10)}</span>
+                </div>
+                {data.report_type && (
+                  <div className="flex justify-between gap-4">
+                    <span className="font-bold uppercase text-slate-400">Report Type</span>
+                    <span className="font-semibold text-slate-700 text-right">{data.report_type.replace(/_/g, " ")}</span>
                   </div>
-                ))}
+                )}
+                <div className="flex justify-between gap-4">
+                  <span className="font-bold uppercase text-slate-400">Stage</span>
+                  <span className="font-semibold text-slate-700 text-right">{(data.progression_stage ?? "").replace(/_/g, " ")}</span>
+                </div>
               </div>
             </div>
           )}
 
-          {!data.isPredicted && data.doctor_notes && (
+          {!data.isPredicted && data.tests_used && data.tests_used.length > 0 && (
             <div className="mt-3 pt-3 border-t border-slate-50">
-              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">{tr("doctorNotes")}:</p>
-              <p className="text-[11px] text-slate-500 italic line-clamp-2">{data.doctor_notes}</p>
+              <p className="text-[10px] font-bold text-primary uppercase mb-2">Tests Used</p>
+              <div className="space-y-1.5">
+                {data.tests_used.map((test: { name: string; value: number; unit?: string | null }, i: number) => (
+                  <div key={`${test.name}-${i}`} className="flex justify-between items-center gap-3 text-xs">
+                    <span className="font-semibold text-slate-700">{test.name.replace(/_/g, " ")}</span>
+                    <span className="text-slate-500 font-mono text-right">
+                      {test.value}{test.unit ? ` ${test.unit}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

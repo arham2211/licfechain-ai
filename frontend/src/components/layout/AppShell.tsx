@@ -152,7 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
           <div className="hidden items-center gap-3 md:flex">
-            <div className="flex items-center gap-1.5 rounded-lg border border-border/50 px-2.5 py-1.5">
+            <div data-no-translate="true" className="flex items-center gap-1.5 rounded-lg border border-border/50 px-2.5 py-1.5">
               <Languages size={14} className="text-muted" />
               <select
                 className="navbar-lang-select"
@@ -209,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 onNav={() => setMenuOpen(false)}
               />
               <div className="mt-4 space-y-2 border-t border-border/50 pt-4">
-                <div className="flex items-center gap-1.5 rounded-lg border border-border/50 px-3 py-2">
+                <div data-no-translate="true" className="flex items-center gap-1.5 rounded-lg border border-border/50 px-3 py-2">
                   <Languages size={14} className="text-muted" />
                   <select
                     className="flex-1 bg-transparent text-sm outline-none"

@@ -7,6 +7,7 @@ import {
   Activity, FlaskConical, Dna, Lightbulb, Stethoscope,
   GitBranch, ArrowRight, TrendingUp, AlertTriangle, CheckCircle,
   BadgeCheck, Phone, Mail, CreditCard, Building2, User, Droplets, MapPin,
+  BarChart3, ShieldCheck, CalendarRange, UsersRound, ClipboardList, HeartPulse,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { ProgressBar } from "@/components/ui/ProgressBar";
@@ -92,6 +93,57 @@ type DoctorProfile = {
   hospital_affiliation?: string;
 };
 
+type DoctorListItem = {
+  patient_id: string;
+  first_name: string;
+  last_name: string;
+  specialization?: string;
+  hospital_affiliation?: string;
+};
+
+type VisitListItem = {
+  visit_id: string;
+  patient_id: string;
+  doctor_patient_id: string;
+  visit_type: string;
+  visit_date: string;
+};
+
+type LabReportListItem = {
+  report_id: string;
+  report_type: string;
+  status: string;
+  report_date: string;
+  patient_id: string;
+  lab_id: string;
+};
+
+type AdminDashboardMetrics = {
+  totalPatients: number;
+  totalDoctors: number;
+  totalLabs: number;
+  totalVisits: number;
+  totalReports: number;
+  completedReports: number;
+  pendingReports: number;
+  uniquePatientVisits: number;
+  recentVisits: number;
+  recentReports: number;
+  averageVisitsPerPatient: number;
+  completionRate: number;
+};
+
+type AdminDashboardData = {
+  metrics: AdminDashboardMetrics;
+  patientGenderMix: Array<{ label: string; value: number }>;
+  visitsByType: Array<{ label: string; value: number }>;
+  reportsByStatus: Array<{ label: string; value: number }>;
+  reportsByType: Array<{ label: string; value: number }>;
+  leadingLabs: Array<{ id: string; label: string; value: number; subtitle: string }>;
+  leadingSpecialties: Array<{ label: string; value: number }>;
+  activityFeed: Array<{ title: string; subtitle: string; meta: string }>;
+};
+
 function computeAge(dob: string): number {
   const birth = new Date(dob);
   const diff = Date.now() - birth.getTime();
@@ -106,6 +158,126 @@ function stageToSeverity(stage: string): number {
   if (s.includes("severe") || s.includes("advanced") || s.includes("stage 4") || s.includes("stage 5")) return 90;
   if (s.includes("high") || s.includes("stage 3")) return 70;
   return 50;
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function daysBetweenNow(dateString: string): number {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return Number.POSITIVE_INFINITY;
+  return (Date.now() - date.getTime()) / (1000 * 60 * 60 * 24);
+}
+
+function formatShortDate(dateString: string): string {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function accumulateCounts<T extends string>(items: T[]): Array<{ label: string; value: number }> {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    counts.set(item, (counts.get(item) ?? 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function prettifyLabel(label: string): string {
+  return label
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function buildAdminDashboardData(
+  patients: Patient[],
+  doctors: DoctorListItem[],
+  labs: LabFacility[],
+  visits: VisitListItem[],
+  reports: LabReportListItem[]
+): AdminDashboardData {
+  const uniqueVisitedPatients = new Set(visits.map((visit) => visit.patient_id)).size;
+  const completedReports = reports.filter((report) => report.status === "completed").length;
+  const pendingReports = reports.filter((report) => report.status !== "completed").length;
+  const recentVisits = visits.filter((visit) => daysBetweenNow(visit.visit_date) <= 30).length;
+  const recentReports = reports.filter((report) => daysBetweenNow(report.report_date) <= 30).length;
+  const genderMix = accumulateCounts(
+    patients.map((patient) => (patient.gender || "unknown").toLowerCase())
+  ).map((entry) => ({ ...entry, label: prettifyLabel(entry.label) }));
+  const visitsByType = accumulateCounts(
+    visits.map((visit) => visit.visit_type || "unspecified")
+  ).map((entry) => ({ ...entry, label: prettifyLabel(entry.label) }));
+  const reportsByStatus = accumulateCounts(
+    reports.map((report) => report.status || "unknown")
+  ).map((entry) => ({ ...entry, label: prettifyLabel(entry.label) }));
+  const reportsByType = accumulateCounts(
+    reports.map((report) => report.report_type || "unknown")
+  )
+    .slice(0, 6)
+    .map((entry) => ({ ...entry, label: prettifyLabel(entry.label) }));
+  const labUsageCounts = new Map<string, number>();
+  reports.forEach((report) => {
+    labUsageCounts.set(report.lab_id, (labUsageCounts.get(report.lab_id) ?? 0) + 1);
+  });
+  const leadingLabs = labs
+    .map((lab) => ({
+      id: lab.lab_id,
+      label: lab.lab_name,
+      value: labUsageCounts.get(lab.lab_id) ?? 0,
+      subtitle: lab.lab_location || lab.email || "Operational lab",
+    }))
+    .filter((lab) => lab.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+  const leadingSpecialties = accumulateCounts(
+    doctors.map((doctor) => doctor.specialization || "general practice")
+  )
+    .slice(0, 5)
+    .map((entry) => ({ ...entry, label: prettifyLabel(entry.label) }));
+
+  const activityFeed = [
+    ...reports.map((report) => ({
+      title: `${prettifyLabel(report.report_type)} report`,
+      subtitle: `${prettifyLabel(report.status)} for patient ${report.patient_id.slice(0, 8)}`,
+      meta: formatShortDate(report.report_date),
+      sortTime: new Date(report.report_date).getTime(),
+    })),
+    ...visits.map((visit) => ({
+      title: `${prettifyLabel(visit.visit_type)} visit`,
+      subtitle: `Patient ${visit.patient_id.slice(0, 8)} with doctor ${visit.doctor_patient_id.slice(0, 8)}`,
+      meta: formatShortDate(visit.visit_date),
+      sortTime: new Date(visit.visit_date).getTime(),
+    })),
+  ]
+    .sort((a, b) => b.sortTime - a.sortTime)
+    .slice(0, 6);
+
+  return {
+    metrics: {
+      totalPatients: patients.length,
+      totalDoctors: doctors.length,
+      totalLabs: labs.length,
+      totalVisits: visits.length,
+      totalReports: reports.length,
+      completedReports,
+      pendingReports,
+      uniquePatientVisits: uniqueVisitedPatients,
+      recentVisits,
+      recentReports,
+      averageVisitsPerPatient: patients.length > 0 ? visits.length / patients.length : 0,
+      completionRate: reports.length > 0 ? (completedReports / reports.length) * 100 : 0,
+    },
+    patientGenderMix: genderMix,
+    visitsByType,
+    reportsByStatus,
+    reportsByType,
+    leadingLabs,
+    leadingSpecialties,
+    activityFeed,
+  };
 }
 
 const DISEASES = ["diabetes", "anemia", "ckd", "parathyroid", "oral_cancer"];
@@ -123,6 +295,7 @@ export default function DashboardPage() {
   const isDoctor = userRoles.includes("doctor");
   const isPatient = primaryRole === "patient";
   const isLab = primaryRole === "lab";
+  const isAdmin = primaryRole === "admin";
 
   const [profile, setProfile] = useState<Patient | null>(null);
   const [diseases, setDiseases] = useState<DiseaseStatus[]>([]);
@@ -134,10 +307,13 @@ export default function DashboardPage() {
   const [doctorProfile, setDoctorProfile] = useState<DoctorProfile | null>(null);
   const [doctorLoading, setDoctorLoading] = useState(false);
   const [labFacility, setLabFacility] = useState<LabFacility | null>(null);
+  const [adminData, setAdminData] = useState<AdminDashboardData | null>(null);
 
   useEffect(() => {
     if (isPatient && patientId) {
       loadPatientDashboard(patientId);
+    } else if (isAdmin) {
+      loadAdminDashboard();
     } else if (isDoctor && patientId) {
       setDoctorLoading(true);
       api.request<DoctorProfile>(`/doctors/${patientId}`)
@@ -157,7 +333,7 @@ export default function DashboardPage() {
       setLoaded(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPatient, patientId, isDoctor, isLab, language]);
+  }, [isPatient, patientId, isDoctor, isLab, isAdmin, language]);
 
   async function loadPatientDashboard(pid: string) {
     try {
@@ -219,6 +395,24 @@ export default function DashboardPage() {
           latest_stage: trText(d.latest_stage),
         }))
       );
+      setLoaded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : tr("failedToLoadDashboard"));
+      setLoaded(true);
+    }
+  }
+
+  async function loadAdminDashboard() {
+    try {
+      const [patients, doctors, labs, visits, reports] = await Promise.all([
+        api.request<Patient[]>("/patients?skip=0&limit=500").catch(() => [] as Patient[]),
+        api.request<DoctorListItem[]>("/doctors?skip=0&limit=500").catch(() => [] as DoctorListItem[]),
+        api.request<LabFacility[]>("/labs?skip=0&limit=500").catch(() => [] as LabFacility[]),
+        api.request<VisitListItem[]>("/visits?skip=0&limit=1000").catch(() => [] as VisitListItem[]),
+        api.request<LabReportListItem[]>("/labs/reports?skip=0&limit=1000").catch(() => [] as LabReportListItem[]),
+      ]);
+
+      setAdminData(buildAdminDashboardData(patients, doctors, labs, visits, reports));
       setLoaded(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : tr("failedToLoadDashboard"));
@@ -413,6 +607,215 @@ export default function DashboardPage() {
       ? labFacility.lab_name
       : user?.username ?? tr("unknownUser");
 
+  if (isAdmin && adminData) {
+    const kpis = [
+      {
+        label: "Patients",
+        value: adminData.metrics.totalPatients,
+        detail: `${adminData.metrics.uniquePatientVisits} active in visits`,
+        icon: <UsersRound size={20} />,
+        accent: "from-cyan-500 to-sky-500",
+      },
+      {
+        label: "Doctors",
+        value: adminData.metrics.totalDoctors,
+        detail: `${adminData.leadingSpecialties.length} lead specialties`,
+        icon: <Stethoscope size={20} />,
+        accent: "from-emerald-500 to-teal-500",
+      },
+      {
+        label: "Labs",
+        value: adminData.metrics.totalLabs,
+        detail: `${adminData.metrics.recentReports} reports this month`,
+        icon: <FlaskConical size={20} />,
+        accent: "from-fuchsia-500 to-violet-500",
+      },
+      {
+        label: "Visits",
+        value: adminData.metrics.totalVisits,
+        detail: `${adminData.metrics.recentVisits} in last 30 days`,
+        icon: <CalendarRange size={20} />,
+        accent: "from-amber-400 to-orange-500",
+      },
+    ];
+
+    return (
+      <motion.div className="space-y-6" initial="hidden" animate="show" variants={stagger}>
+        <motion.section
+          variants={fadeUp}
+          className="relative overflow-hidden rounded-[34px] border border-white/80 bg-white/78 px-6 py-7 shadow-[0_30px_90px_rgba(2,132,199,0.14)] backdrop-blur-2xl sm:px-8"
+        >
+          <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-primary-500 via-cyan-400 to-sky-300 opacity-90" />
+          <div className="absolute -top-24 right-0 h-72 w-72 rounded-full bg-primary-100/55 blur-[100px]" />
+          <div className="absolute -bottom-20 left-0 h-64 w-64 rounded-full bg-cyan-100/60 blur-[100px]" />
+          <div className="relative z-10 grid gap-6 lg:grid-cols-[1.35fr_0.9fr]">
+            <div>
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-primary">
+                <ShieldCheck size={14} className="text-primary" />
+                Executive Control Center
+              </div>
+              <h1 className="max-w-3xl text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                Admin Dashboard
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+                A live operational view across patients, providers, labs, visits, and report throughput built from the platform&apos;s current records.
+              </p>
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                <ExecutiveStatCard
+                  label="Report completion"
+                  value={`${Math.round(adminData.metrics.completionRate)}%`}
+                  detail={`${adminData.metrics.completedReports} of ${adminData.metrics.totalReports} closed`}
+                />
+                <ExecutiveStatCard
+                  label="Average visit load"
+                  value={adminData.metrics.averageVisitsPerPatient.toFixed(1)}
+                  detail="Visits per patient"
+                />
+                <ExecutiveStatCard
+                  label="Pending queue"
+                  value={String(adminData.metrics.pendingReports)}
+                  detail="Reports still in motion"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 rounded-[28px] border border-white/80 bg-white/72 p-4 shadow-[0_18px_50px_rgba(2,132,199,0.08)]">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">System Pulse</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900">This month at a glance</div>
+                </div>
+                <div className="rounded-2xl bg-success/12 px-3 py-1 text-xs font-semibold text-success">
+                  Stable network
+                </div>
+              </div>
+              <PulseMeter
+                label="Visit velocity"
+                value={adminData.metrics.recentVisits}
+                max={Math.max(adminData.metrics.totalVisits, adminData.metrics.recentVisits, 1)}
+                color="bg-cyan-400"
+              />
+              <PulseMeter
+                label="Report volume"
+                value={adminData.metrics.recentReports}
+                max={Math.max(adminData.metrics.totalReports, adminData.metrics.recentReports, 1)}
+                color="bg-fuchsia-400"
+              />
+              <PulseMeter
+                label="Lab capacity"
+                value={adminData.leadingLabs.reduce((sum, lab) => sum + lab.value, 0)}
+                max={Math.max(adminData.metrics.totalReports, 1)}
+                color="bg-emerald-400"
+              />
+            </div>
+          </div>
+        </motion.section>
+
+        {error && <div className="alert-error">{error}</div>}
+
+        <motion.section variants={fadeUp} className="grid gap-4 xl:grid-cols-4">
+          {kpis.map((kpi) => (
+            <div
+              key={kpi.label}
+              className="group relative overflow-hidden rounded-[28px] border border-slate-200/70 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl"
+            >
+              <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${kpi.accent}`} />
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">{kpi.label}</div>
+                  <div className="mt-3 text-4xl font-black tracking-tight text-slate-950">{formatCompactNumber(kpi.value)}</div>
+                  <div className="mt-2 text-sm text-slate-500">{kpi.detail}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700 transition group-hover:scale-105">
+                  {kpi.icon}
+                </div>
+              </div>
+            </div>
+          ))}
+        </motion.section>
+
+        <motion.section variants={fadeUp} className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr]">
+          <PowerPanel
+            title="Care Pathways"
+            subtitle="Patient mix, visit demand, and reporting cadence"
+            icon={<HeartPulse size={18} />}
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
+              <MetricList
+                title="Gender distribution"
+                rows={adminData.patientGenderMix}
+                tone="cyan"
+              />
+              <MetricList
+                title="Visit types"
+                rows={adminData.visitsByType}
+                tone="violet"
+              />
+            </div>
+          </PowerPanel>
+
+          <PowerPanel
+            title="Report Pipeline"
+            subtitle="Status balance and top report categories"
+            icon={<ClipboardList size={18} />}
+          >
+            <div className="space-y-4">
+              <MetricList title="Status overview" rows={adminData.reportsByStatus} tone="emerald" compact />
+              <MetricList title="Top report types" rows={adminData.reportsByType} tone="amber" compact />
+            </div>
+          </PowerPanel>
+        </motion.section>
+
+        <motion.section variants={fadeUp} className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <PowerPanel
+            title="Top Performing Labs"
+            subtitle="Facilities handling the most reporting load"
+            icon={<FlaskConical size={18} />}
+          >
+            <Leaderboard
+              rows={adminData.leadingLabs.map((lab) => ({
+                id: lab.id,
+                label: lab.label,
+                value: lab.value,
+                subtitle: lab.subtitle,
+              }))}
+              suffix="reports"
+            />
+          </PowerPanel>
+
+          <PowerPanel
+            title="Provider Mix"
+            subtitle="Specialties currently shaping the care network"
+            icon={<BarChart3 size={18} />}
+          >
+            <MetricList title="Lead specialties" rows={adminData.leadingSpecialties} tone="pink" />
+          </PowerPanel>
+        </motion.section>
+
+        <motion.section variants={fadeUp}>
+          <PowerPanel
+            title="Recent Operations Feed"
+            subtitle="Most recent report and visit activity entering the system"
+            icon={<TrendingUp size={18} />}
+          >
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {adminData.activityFeed.map((item, index) => (
+                <div
+                  key={`${item.title}-${index}`}
+                  className="rounded-2xl border border-slate-200/70 bg-slate-50/85 p-4 shadow-sm"
+                >
+                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">{item.meta}</div>
+                  <div className="mt-2 text-base font-semibold text-slate-900">{item.title}</div>
+                  <div className="mt-1 text-sm leading-6 text-slate-600">{item.subtitle}</div>
+                </div>
+              ))}
+            </div>
+          </PowerPanel>
+        </motion.section>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div className="space-y-5" initial="hidden" animate="show" variants={stagger}>
       <motion.div variants={fadeUp} className="card-gradient p-6">
@@ -513,6 +916,164 @@ export default function DashboardPage() {
         </motion.div>
       )}
     </motion.div>
+  );
+}
+
+function ExecutiveStatCard({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/80 bg-white/80 px-4 py-4 shadow-sm backdrop-blur-sm">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</div>
+      <div className="mt-3 text-3xl font-black tracking-tight text-slate-950">{value}</div>
+      <div className="mt-1 text-sm text-slate-600">{detail}</div>
+    </div>
+  );
+}
+
+function PulseMeter({
+  label,
+  value,
+  max,
+  color,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  color: string;
+}) {
+  const width = Math.max(8, Math.min(100, (value / Math.max(max, 1)) * 100));
+  return (
+    <div className="rounded-2xl border border-slate-200/70 bg-slate-50/85 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium text-slate-700">{label}</div>
+        <div className="text-sm font-semibold text-slate-900">{formatCompactNumber(value)}</div>
+      </div>
+      <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function PowerPanel({
+  title,
+  subtitle,
+  icon,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[30px] border border-white/80 bg-white/86 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <div className="inline-flex items-center gap-2 text-sm font-semibold text-primary">
+            <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10">
+              {icon}
+            </span>
+            {title}
+          </div>
+          <div className="mt-2 text-sm text-slate-500">{subtitle}</div>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function MetricList({
+  title,
+  rows,
+  tone,
+  compact = false,
+}: {
+  title: string;
+  rows: Array<{ label: string; value: number }>;
+  tone: "cyan" | "violet" | "emerald" | "amber" | "pink";
+  compact?: boolean;
+}) {
+  const toneClasses: Record<"cyan" | "violet" | "emerald" | "amber" | "pink", string> = {
+    cyan: "from-cyan-400 to-sky-500",
+    violet: "from-violet-400 to-fuchsia-500",
+    emerald: "from-emerald-400 to-teal-500",
+    amber: "from-amber-400 to-orange-500",
+    pink: "from-pink-400 to-rose-500",
+  };
+  const maxValue = Math.max(...rows.map((row) => row.value), 1);
+
+  return (
+    <div className={`rounded-3xl border ${compact ? "border-slate-200/60 bg-slate-50/80" : "border-slate-200/70 bg-slate-50/65"} p-4`}>
+      <div className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-slate-400">{title}</div>
+      <div className="space-y-3">
+        {rows.length > 0 ? rows.map((row) => (
+          <div key={row.label}>
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <div className="truncate text-sm font-medium text-slate-700">{row.label}</div>
+              <div className="text-sm font-semibold text-slate-900">{formatCompactNumber(row.value)}</div>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className={`h-full rounded-full bg-gradient-to-r ${toneClasses[tone]}`}
+                style={{ width: `${Math.max(10, (row.value / maxValue) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )) : (
+          <div className="text-sm text-slate-500">No records available.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Leaderboard({
+  rows,
+  suffix,
+}: {
+  rows: Array<{ id: string; label: string; value: number; subtitle: string }>;
+  suffix: string;
+}) {
+  const maxValue = Math.max(...rows.map((row) => row.value), 1);
+
+  return (
+    <div className="space-y-3">
+      {rows.length > 0 ? rows.map((row, index) => (
+        <div key={row.id} className="rounded-3xl border border-slate-200/70 bg-slate-50/85 p-4">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-black text-white">
+              {index + 1}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="truncate text-base font-semibold text-slate-900">{row.label}</div>
+                <div className="text-sm font-semibold text-slate-700">{row.value} {suffix}</div>
+              </div>
+              <div className="mt-1 text-sm text-slate-500">{row.subtitle}</div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500"
+                  style={{ width: `${Math.max(12, (row.value / maxValue) * 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )) : (
+        <div className="rounded-3xl border border-slate-200/70 bg-slate-50/85 p-4 text-sm text-slate-500">
+          No leaderboard data available yet.
+        </div>
+      )}
+    </div>
   );
 }
 

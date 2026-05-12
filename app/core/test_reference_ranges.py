@@ -69,6 +69,13 @@ TEST_REFERENCE_RANGES: Dict[str, Dict] = {
         "gender_specific": False,
         "description": "Total cholesterol level"
     },
+    "egfr": {
+        "unit": "mL/min/1.73m²",
+        "reference_range_min": 90.0,
+        "reference_range_max": 120.0,
+        "gender_specific": False,
+        "description": "Estimated glomerular filtration rate - overall kidney filtration function"
+    },
     "creatinine": {
         "unit": "mg/dL",
         "reference_range_min": 0.6,  # Male: 0.7-1.3, Female: 0.6-1.1
@@ -86,6 +93,55 @@ TEST_REFERENCE_RANGES: Dict[str, Dict] = {
         "reference_range_max": 24.9,  # Normal: 18.5-24.9, Overweight: 25-29.9, Obese: 30+
         "gender_specific": False,
         "description": "Body Mass Index"
+    },
+    "uacr": {
+        "unit": "mg/g",
+        "reference_range_min": 0.0,
+        "reference_range_max": 30.0,
+        "gender_specific": False,
+        "description": "Urine albumin-to-creatinine ratio - marker of kidney damage"
+    },
+    "bun": {
+        "unit": "mg/dL",
+        "reference_range_min": 7.0,
+        "reference_range_max": 20.0,
+        "gender_specific": False,
+        "description": "Blood urea nitrogen - kidney function and hydration marker"
+    },
+    "potassium": {
+        "unit": "mmol/L",
+        "reference_range_min": 3.5,
+        "reference_range_max": 5.1,
+        "gender_specific": False,
+        "description": "Potassium - important electrolyte affected in kidney disease"
+    },
+    "phosphorus": {
+        "unit": "mg/dL",
+        "reference_range_min": 2.5,
+        "reference_range_max": 4.5,
+        "gender_specific": False,
+        "description": "Phosphorus - mineral balance marker relevant in CKD and parathyroid disease"
+    },
+    "calcium": {
+        "unit": "mg/dL",
+        "reference_range_min": 8.5,
+        "reference_range_max": 10.2,
+        "gender_specific": False,
+        "description": "Calcium - key marker in parathyroid and bone-mineral disorders"
+    },
+    "pth": {
+        "unit": "pg/mL",
+        "reference_range_min": 15.0,
+        "reference_range_max": 65.0,
+        "gender_specific": False,
+        "description": "Parathyroid hormone - primary hormone marker for parathyroid disorders"
+    },
+    "vitamin_d": {
+        "unit": "ng/mL",
+        "reference_range_min": 30.0,
+        "reference_range_max": 100.0,
+        "gender_specific": False,
+        "description": "Vitamin D - bone and mineral metabolism marker often paired with PTH"
     },
     "systolic_bp": {
         "unit": "mmHg",
@@ -223,6 +279,81 @@ TEST_REFERENCE_RANGES: Dict[str, Dict] = {
     }
 }
 
+PROGRESSION_TEST_MAPPINGS: Dict[str, Tuple[str, ...]] = {
+    "diabetes": (
+        "fasting_glucose",
+        "hba1c",
+        "hdl",
+        "ldl",
+        "triglycerides",
+        "bmi",
+    ),
+    "anemia": (
+        "hemoglobin",
+        "hematocrit",
+        "mcv",
+        "mch",
+        "mchc",
+        "rdw",
+        "serum_iron",
+        "ferritin",
+        "tibc",
+        "transferrin_saturation",
+        "reticulocyte_count",
+    ),
+    "ckd": (
+        "creatinine",
+        "egfr",
+        "uacr",
+        "bun",
+        "potassium",
+        "phosphorus",
+        "pth",
+        "calcium",
+        "vitamin_d",
+    ),
+    "parathyroid": (
+        "pth",
+        "calcium",
+        "phosphorus",
+        "vitamin_d",
+        "creatinine",
+        "egfr",
+    ),
+    "oral_cancer": (),
+}
+
+
+def normalize_disease_key(disease_name: str) -> str:
+    """Normalize free-text disease names to a stable lookup key."""
+    normalized = (disease_name or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+    if "kidney" in normalized or "ckd" in normalized or "renal" in normalized:
+        return "ckd"
+    if "diabet" in normalized or "glycem" in normalized:
+        return "diabetes"
+    if "anemia" in normalized or "iron_deficiency" in normalized or normalized == "ida":
+        return "anemia"
+    if "parathyroid" in normalized or "hyperparathy" in normalized or "hypoparathy" in normalized:
+        return "parathyroid"
+    if "oral" in normalized or "cancer" in normalized:
+        return "oral_cancer"
+
+    return normalized
+
+
+def get_progression_tests_for_disease(disease_name: str, supported_only: bool = True) -> Tuple[str, ...]:
+    """
+    Get the supported lab-test names that should be used for a disease's progression logic.
+    """
+    disease_key = normalize_disease_key(disease_name)
+    mapped_tests = PROGRESSION_TEST_MAPPINGS.get(disease_key, ())
+
+    if not supported_only:
+        return mapped_tests
+
+    return tuple(test_name for test_name in mapped_tests if test_name in TEST_REFERENCE_RANGES)
+
 
 def get_reference_range(test_name: str, gender: Optional[str] = None) -> Tuple[float, float, str]:
     """
@@ -290,4 +421,3 @@ def get_all_supported_tests() -> Dict[str, Dict]:
         Dictionary of all supported tests with their information
     """
     return TEST_REFERENCE_RANGES.copy()
-
