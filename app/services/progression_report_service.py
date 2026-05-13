@@ -104,6 +104,8 @@ class ProgressionReportService:
             fasting_glucose = values.get("fasting_glucose")
             if hba1c is None and fasting_glucose is None:
                 return None
+            if fasting_glucose is not None and fasting_glucose < 70:
+                return "Hypoglycemia"
             if (hba1c is not None and hba1c >= 8.0) or (fasting_glucose is not None and fasting_glucose >= 180):
                 return "Uncontrolled"
             if (hba1c is not None and hba1c >= 6.5) or (fasting_glucose is not None and fasting_glucose >= 126):
@@ -332,6 +334,7 @@ class ProgressionReportService:
         # Diabetes progression scores
         diabetes_scores = {
             'normal': 0.0,
+            'hypoglycemia': 4.5,
             'prediabetes': 3.0,
             'pre-diabetes': 3.0,
             'controlled': 4.0,
@@ -748,7 +751,9 @@ class ProgressionReportService:
             for test_name, values in lab_values.items():
                 avg_value = sum(values) / len(values)
                 
-                if test_name == 'fasting_glucose' and avg_value > 126:
+                if test_name == 'fasting_glucose' and avg_value < 70:
+                    risk_factors.append(f"Low fasting glucose: {avg_value:.1f} mg/dL")
+                elif test_name == 'fasting_glucose' and avg_value > 126:
                     risk_factors.append(f"Elevated fasting glucose: {avg_value:.1f} mg/dL")
                 elif test_name == 'hba1c' and avg_value > 6.5:
                     risk_factors.append(f"Elevated HbA1c: {avg_value:.1f}%")

@@ -100,6 +100,8 @@ def _estimate_progression_stage(disease_key: str, lookup: dict[str, float]) -> t
     if disease_key == "diabetes":
         hba1c = _first_value(lookup, ["hba1c", "hb_a1c"])
         glucose = _first_value(lookup, ["fasting_glucose", "glucose"])
+        if glucose is not None and glucose < 70:
+            return "Hypoglycemia", 0.86
         if hba1c is not None:
             if hba1c < 5.7:
                 return "Normal", 0.86

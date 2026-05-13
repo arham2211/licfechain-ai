@@ -199,6 +199,7 @@ export default function ReportsPage() {
     },
     diabetes: {
       "normal": 0,
+      "hypoglycemia": 4.5,
       "prediabetes": 3, "pre-diabetes": 3,
       "controlled": 4,
       "diabetes": 5,
@@ -324,6 +325,7 @@ export default function ReportsPage() {
     "stage 5": "#D32F2F", "stage_5": "#D32F2F", "ckd stage 5": "#D32F2F",
     "esrd": "#9C27B0", "end stage renal disease": "#9C27B0", "end stage renal disease (esrd)": "#9C27B0", "dialysis": "#9C27B0",
     // Diabetes
+    "hypoglycemia": "#FF9800",
     "prediabetes": "#FFF176", "pre-diabetes": "#FFF176",
     "controlled": "#66BB6A",
     "diabetes": "#FFC107",
